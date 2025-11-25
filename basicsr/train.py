@@ -6,6 +6,13 @@ import random
 import time
 import torch
 from os import path as osp
+import os
+import sys
+
+# **1. 注入路径**：确保Python能找到项目根目录
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+sys.path.insert(0, root_dir)
 
 from basicsr.data import create_dataloader, create_dataset
 from basicsr.data.data_sampler import EnlargedSampler
