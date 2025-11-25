@@ -1,6 +1,7 @@
 import yaml
 from collections import OrderedDict
 from os import path as osp
+import codecs # <--- 添加这行，用于处理编码
 
 
 def ordered_yaml():
@@ -38,7 +39,7 @@ def parse(opt_path, is_train=True):
     Returns:
         (dict): Options.
     """
-    with open(opt_path, mode='r') as f:
+    with codecs.open(opt_path, mode='r', encoding='utf-8') as f:
         Loader, _ = ordered_yaml()
         opt = yaml.load(f, Loader=Loader)
 
