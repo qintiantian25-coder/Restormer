@@ -57,7 +57,7 @@ def get_weights_and_parameters(task, parameters):
     elif task == 'Deraining':
         weights = os.path.join('Deraining', 'pretrained_models', 'deraining.pth')
     elif task == 'Real_Denoising':
-        weights = os.path.join('Denoising', 'pretrained_models', 'real_denoising.pth')
+        weights = os.path.join('experiments', 'RealDenosing_blindpixels_RGB', 'models', 'net_g_300000.pth')
         parameters['LayerNorm_type'] =  'BiasFree'
     elif task == 'Gaussian_Color_Denoising':
         weights = os.path.join('Denoising', 'pretrained_models', 'gaussian_color_denoising_blind.pth')
@@ -71,7 +71,7 @@ def get_weights_and_parameters(task, parameters):
 
 task    = args.task
 inp_dir = args.input_dir
-out_dir = os.path.join(args.result_dir, task)
+out_dir = os.path.join(args.result_dir, 'Real_Denoising_RGB')
 
 os.makedirs(out_dir, exist_ok=True)
 
