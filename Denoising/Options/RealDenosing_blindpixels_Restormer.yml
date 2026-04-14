@@ -109,7 +109,7 @@ val:
   val_freq: !!float 4e3
   save_img: false
   rgb2bgr: true
-  use_image: false
+  use_image: true
   max_minibatch: 8
 
   metrics:
@@ -124,23 +124,23 @@ val:
     # For val set with a fixed blind coordinate pattern (e.g., only scene 001).
     blind_mae:
       type: calculate_blind_mae
-      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask/001/blind_pixel_coords.csv
+      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask_flat/blind_pixel_coords.csv
       x_col: x
       y_col: y
     blind_rmse:
       type: calculate_blind_rmse
-      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask/001/blind_pixel_coords.csv
+      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask_flat/blind_pixel_coords.csv
       x_col: x
       y_col: y
     blind_psnr:
       type: calculate_blind_psnr
-      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask/001/blind_pixel_coords.csv
+      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask_flat/blind_pixel_coords.csv
       x_col: x
       y_col: y
       peak: 255.0
     blind_count:
       type: calculate_blind_count
-      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask/001/blind_pixel_coords.csv
+      csv_path: E:/qtt/mangyuan/FMA-Net/data/val_mask_flat/blind_pixel_coords.csv
       x_col: x
       y_col: y
 
