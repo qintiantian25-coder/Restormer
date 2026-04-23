@@ -9,8 +9,8 @@ datasets:
   test:
     name: TestSet
     type: Dataset_PairedImage
-    dataroot_gt: /home/tianyu/Pythonproject/ART/data/test_sharp
-    dataroot_lq: /home/tianyu/Pythonproject/ART/data/test_blur
+    dataroot_gt: /root/Qtt/Restormer/data/test_sharp
+    dataroot_lq: /root/Qtt/Restormer/data/test_blur
     filename_tmpl: '{}'
     io_backend:
       type: disk
@@ -54,23 +54,23 @@ val:
       test_y_channel: false
     blind_mae:
       type: calculate_blind_mae
-      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      csv_path: /root/Qtt/Restormer/data/test_mask/blind_pixel_coords.csv
       x_col: x
       y_col: y
     blind_rmse:
       type: calculate_blind_rmse
-      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      csv_path: /root/Qtt/Restormer/data/test_mask/blind_pixel_coords.csv
       x_col: x
       y_col: y
     blind_psnr:
       type: calculate_blind_psnr
-      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      csv_path: /root/Qtt/Restormer/data/test_mask/blind_pixel_coords.csv
       x_col: x
       y_col: y
       peak: 255.0
     blind_count:
       type: calculate_blind_count
-      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      csv_path: /root/Qtt/Restormer/data/test_mask/blind_pixel_coords.csv
       x_col: x
       y_col: y
 
