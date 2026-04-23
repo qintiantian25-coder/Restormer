@@ -8,3 +8,16 @@
 *.npy
 .DS_Store
 
+# Ignore local/test utility and blind-pixel CSVs and Windows ADS files
+fangzhen.py
+blind_pixel_coords.csv
+# ignore blind pixel CSVs under any mask folder
+*/train_mask/blind_pixel_coords.csv
+*/val_mask/blind_pixel_coords.csv
+*/test_mask/blind_pixel_coords.csv
+# ignore Zone.Identifier alternate data stream files (Windows artifacts)
+*.Zone.Identifier
+# ignore blind pixel mask images and their ADS
+blind_pixel_mask.png
+blind_pixel_mask.png:Zone.Identifier
+
