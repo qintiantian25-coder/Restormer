@@ -83,8 +83,9 @@ train:
   scheduler:
     type: CosineAnnealingRestartCyclicLR
     periods: [92000, 208000]
-    restart_weights: [1,1]
+        num_worker_per_gpu: 8
     eta_mins: [0.0003,0.000001]
+        pin_memory: true
 
   mixing_augs:
     mixup: true
@@ -101,7 +102,7 @@ train:
   pixel_opt:
     type: L1Loss
     loss_weight: 1
-    reduction: mean
+        prefetch_mode: 'cuda'
 
 # validation settings
 val:
