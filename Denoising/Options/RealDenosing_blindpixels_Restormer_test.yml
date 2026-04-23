@@ -1,0 +1,80 @@
+# Test config for RealDenosing blind-pixel evaluation
+name: RealDenosing_blindpixels_RGB_test
+model_type: ImageCleanModel
+scale: 1
+num_gpu: 1
+manual_seed: 100
+
+datasets:
+  test:
+    name: TestSet
+    type: Dataset_PairedImage
+    dataroot_gt: /home/tianyu/Pythonproject/ART/data/test_sharp
+    dataroot_lq: /home/tianyu/Pythonproject/ART/data/test_blur
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+
+# network (same as training)
+network_g:
+  type: Restormer
+  inp_channels: 3
+  out_channels: 3
+  dim: 48
+  num_blocks: [4,6,6,8]
+  num_refinement_blocks: 4
+  heads: [1,2,4,8]
+  ffn_expansion_factor: 2.66
+  bias: False
+  LayerNorm_type: BiasFree
+  dual_pixel_task: False
+
+path:
+  # set this to the checkpoint you want to evaluate, e.g. experiments/RealDenosing_blindpixels_RGB/models/latest.pth
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+
+val:
+  window_size: 8
+  val_freq: 4000
+  save_img: true
+  rgb2bgr: true
+  use_image: true
+  max_minibatch: 8
+
+  metrics:
+    psnr:
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+    blind_mae:
+      type: calculate_blind_mae
+      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      x_col: x
+      y_col: y
+    blind_rmse:
+      type: calculate_blind_rmse
+      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      x_col: x
+      y_col: y
+    blind_psnr:
+      type: calculate_blind_psnr
+      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      x_col: x
+      y_col: y
+      peak: 255.0
+    blind_count:
+      type: calculate_blind_count
+      csv_path: /home/tianyu/Pythonproject/ART/data/test_mask/blind_pixel_coords.csv
+      x_col: x
+      y_col: y
+
+logger:
+  print_freq: 100
+  save_checkpoint_freq: 4000
+  use_tb_logger: false
