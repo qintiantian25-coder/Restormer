@@ -6,8 +6,12 @@
 *.pth
 *.mat
 *.npy
+*.zip
 .DS_Store
-
+basicsr/metrics/__pycache__/
+basicsr/__pycache__/
+tb_logger/
+experiments/
 # Ignore local/test utility and blind-pixel CSVs and Windows ADS files
 fangzhen.py
 blind_pixel_coords.csv
