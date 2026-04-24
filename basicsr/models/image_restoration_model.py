@@ -23,19 +23,14 @@ class Mixing_Augment:
     def __init__(self, mixup_beta, use_identity, device):
         self.dist = torch.distributions.beta.Beta(torch.tensor([mixup_beta]), torch.tensor([mixup_beta]))
         self.device = device
-
         self.use_identity = use_identity
-
         self.augments = [self.mixup]
 
     def mixup(self, target, input_):
         lam = self.dist.rsample((1,1)).item()
-    
         r_index = torch.randperm(target.size(0)).to(self.device)
-    
         target = lam * target + (1-lam) * target[r_index, :]
         input_ = lam * input_ + (1-lam) * input_[r_index, :]
-    
         return target, input_
 
     def __call__(self, target, input_):
@@ -54,8 +49,6 @@ class ImageCleanModel(BaseModel):
     def __init__(self, opt):
         super(ImageCleanModel, self).__init__(opt)
 
-        # define network
-
         self.mixing_flag = self.opt['train']['mixing_augs'].get('mixup', False)
         if self.mixing_flag:
             mixup_beta       = self.opt['train']['mixing_augs'].get('mixup_beta', 1.2)
@@ -66,7 +59,6 @@ class ImageCleanModel(BaseModel):
         self.net_g = self.model_to_device(self.net_g)
         self.print_network(self.net_g)
 
-        # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
         if load_path is not None:
             self.load_network(self.net_g, load_path,
@@ -75,6 +67,9 @@ class ImageCleanModel(BaseModel):
         if self.is_train:
             self.init_training_settings()
 
+        # 新增：用于跟踪最佳 PSNR
+        self.best_psnr = -float('inf')
+
     def init_training_settings(self):
         self.net_g.train()
         train_opt = self.opt['train']
@@ -82,33 +77,23 @@ class ImageCleanModel(BaseModel):
         self.ema_decay = train_opt.get('ema_decay', 0)
         if self.ema_decay > 0:
             logger = get_root_logger()
-            logger.info(
-                f'Use Exponential Moving Average with decay: {self.ema_decay}')
-            # define network net_g with Exponential Moving Average (EMA)
-            # net_g_ema is used only for testing on one GPU and saving
-            # There is no need to wrap with DistributedDataParallel
-            self.net_g_ema = define_network(self.opt['network_g']).to(
-                self.device)
-            # load pretrained model
+            logger.info(f'Use Exponential Moving Average with decay: {self.ema_decay}')
+            self.net_g_ema = define_network(self.opt['network_g']).to(self.device)
             load_path = self.opt['path'].get('pretrain_network_g', None)
             if load_path is not None:
                 self.load_network(self.net_g_ema, load_path,
-                                  self.opt['path'].get('strict_load_g',
-                                                       True), 'params_ema')
+                                  self.opt['path'].get('strict_load_g', True), 'params_ema')
             else:
-                self.model_ema(0)  # copy net_g weight
+                self.model_ema(0)
             self.net_g_ema.eval()
 
-        # define losses
         if train_opt.get('pixel_opt'):
             pixel_type = train_opt['pixel_opt'].pop('type')
             cri_pix_cls = getattr(loss_module, pixel_type)
-            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(
-                self.device)
+            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(self.device)
         else:
             raise ValueError('pixel loss are None.')
 
-        # set up optimizers and schedulers
         self.setup_optimizers()
         self.setup_schedulers()
 
@@ -129,15 +114,13 @@ class ImageCleanModel(BaseModel):
         elif optim_type == 'AdamW':
             self.optimizer_g = torch.optim.AdamW(optim_params, **train_opt['optim_g'])
         else:
-            raise NotImplementedError(
-                f'optimizer {optim_type} is not supperted yet.')
+            raise NotImplementedError(f'optimizer {optim_type} is not supperted yet.')
         self.optimizers.append(self.optimizer_g)
 
     def feed_train_data(self, data):
         self.lq = data['lq'].to(self.device)
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
-
         if self.mixing_flag:
             self.gt, self.lq = self.mixing_augmentation(self.gt, self.lq)
 
@@ -155,7 +138,6 @@ class ImageCleanModel(BaseModel):
         self.output = preds[-1]
 
         loss_dict = OrderedDict()
-        # pixel loss
         l_pix = 0.
         for pred in preds:
             l_pix += self.cri_pix(pred, self.gt)
@@ -219,8 +201,6 @@ class ImageCleanModel(BaseModel):
                 metric: 0
                 for metric in self.opt['val']['metrics'].keys()
             }
-        # pbar = tqdm(total=len(dataloader), unit='image')
-
         window_size = self.opt['val'].get('window_size', 0)
 
         if window_size:
@@ -232,46 +212,36 @@ class ImageCleanModel(BaseModel):
 
         for idx, val_data in enumerate(dataloader):
             img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
-
             self.feed_data(val_data)
             test()
-
             visuals = self.get_current_visuals()
             sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
             if 'gt' in visuals:
                 gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
                 del self.gt
-
-            # tentative for out of GPU memory
             del self.lq
             del self.output
             torch.cuda.empty_cache()
 
             if save_img:
-                
                 if self.opt['is_train']:
-                    
                     save_img_path = osp.join(self.opt['path']['visualization'],
                                              img_name,
                                              f'{img_name}_{current_iter}.png')
-                    
                     save_gt_img_path = osp.join(self.opt['path']['visualization'],
                                              img_name,
                                              f'{img_name}_{current_iter}_gt.png')
                 else:
-                    
                     save_img_path = osp.join(
                         self.opt['path']['visualization'], dataset_name,
                         f'{img_name}.png')
                     save_gt_img_path = osp.join(
                         self.opt['path']['visualization'], dataset_name,
                         f'{img_name}_gt.png')
-                    
                 imwrite(sr_img, save_img_path)
                 imwrite(gt_img, save_gt_img_path)
 
             if with_metrics:
-                # calculate metrics
                 opt_metric = deepcopy(self.opt['val']['metrics'])
                 if use_image:
                     for name, opt_ in opt_metric.items():
@@ -283,22 +253,32 @@ class ImageCleanModel(BaseModel):
                         metric_type = opt_.pop('type')
                         self.metric_results[name] += getattr(
                             metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
-
             cnt += 1
 
         current_metric = 0.
         if with_metrics:
             for metric in self.metric_results.keys():
                 self.metric_results[metric] /= cnt
-                current_metric = self.metric_results[metric]
+                if metric == 'psnr':   # 假设 PSNR 指标名为 'psnr'
+                    current_metric = self.metric_results[metric]
+            self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
 
-            self._log_validation_metric_values(current_iter, dataset_name,
-                                               tb_logger)
+        # ========== 新增：保存最佳模型 ==========
+        if with_metrics and 'psnr' in self.metric_results:
+            current_psnr = self.metric_results['psnr']
+            if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
+                if current_psnr > self.best_psnr:
+                    self.best_psnr = current_psnr
+                    best_model_path = os.path.join(self.opt['path']['models'], 'best_model.pth')
+                    net_g = self.get_bare_model(self.net_g)
+                    torch.save({'params': net_g.state_dict()}, best_model_path)
+                    logger = get_root_logger()
+                    logger.info(f'New best model saved with PSNR: {self.best_psnr:.4f} at iteration {current_iter}')
+        # ======================================
+
         return current_metric
 
-
-    def _log_validation_metric_values(self, current_iter, dataset_name,
-                                      tb_logger):
+    def _log_validation_metric_values(self, current_iter, dataset_name, tb_logger):
         log_str = f'Validation {dataset_name},\t'
         for metric, value in self.metric_results.items():
             log_str += f'\t # {metric}: {value:.4f}'

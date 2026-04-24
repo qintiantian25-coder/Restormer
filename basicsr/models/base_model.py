@@ -1,6 +1,7 @@
 import logging
 import os
 import torch
+import shutil
 from collections import OrderedDict
 from copy import deepcopy
 from torch.nn.parallel import DataParallel, DistributedDataParallel
@@ -20,6 +21,8 @@ class BaseModel():
         self.is_train = opt['is_train']
         self.schedulers = []
         self.optimizers = []
+        # 新增：记录最佳 PSNR 值，初始化为负无穷
+        self.best_psnr = -float('inf')
 
     def feed_data(self, data):
         pass
@@ -46,10 +49,25 @@ class BaseModel():
             use_image (bool): Whether to use saved images to compute metrics (PSNR, SSIM), if not, then use data directly from network' output. Default: True
         """
         if self.opt['dist']:
-            return self.dist_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
+            self.dist_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
         else:
-            return self.nondist_validation(dataloader, current_iter, tb_logger,
-                                    save_img, rgb2bgr, use_image)
+            self.nondist_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
+
+        # ---------- 新增：根据 PSNR 保存最佳模型 ----------
+        # 从 log_dict 中获取 psnr 值（注意：子类中通常将 psnr 存储在 log_dict['psnr']）
+        if hasattr(self, 'log_dict') and 'psnr' in self.log_dict:
+            current_psnr = self.log_dict['psnr']
+            # 只在主进程（非分布式或 rank=0）保存，避免多进程冲突
+            if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
+                if current_psnr > self.best_psnr:
+                    self.best_psnr = current_psnr
+                    # 保存最佳模型
+                    best_model_path = os.path.join(self.opt['path']['models'], 'best_model.pth')
+                    # 获取裸模型（去除 DataParallel 包装）
+                    net_g = self.get_bare_model(self.net_g)
+                    torch.save({'params': net_g.state_dict()}, best_model_path)
+                    logger.info(f'New best model saved with PSNR: {self.best_psnr:.4f} at iteration {current_iter}')
+        # ------------------------------------------------
 
     def model_ema(self, decay=0.999):
         net_g = self.get_bare_model(self.net_g)
