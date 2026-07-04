@@ -77,6 +77,9 @@ class ImageCleanModel(BaseModel):
         self.net_g.train()
         train_opt = self.opt['train']
 
+        self.use_fp16 = train_opt.get('use_fp16', False)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_fp16)
+
         self.ema_decay = train_opt.get('ema_decay', 0)
         if self.ema_decay > 0:
             logger = get_root_logger()
@@ -142,28 +145,32 @@ class ImageCleanModel(BaseModel):
 
     def optimize_parameters(self, current_iter):
         self.optimizer_g.zero_grad()
-        preds = self.net_g(self.lq)
-        if not isinstance(preds, list):
-            preds = [preds]
 
-        self.output = preds[-1]
+        with torch.cuda.amp.autocast(enabled=self.use_fp16):
+            preds = self.net_g(self.lq)
+            if not isinstance(preds, list):
+                preds = [preds]
 
-        loss_dict = OrderedDict()
-        l_pix = 0.
-        for pred in preds:
-            if self.blind_mask is not None:
-                diff = torch.abs(pred - self.gt)
-                weight = 1.0 + self.blind_mask * (self.blind_weight - 1.0)
-                l_pix += (diff * weight).mean()
-            else:
-                l_pix += self.cri_pix(pred, self.gt)
+            self.output = preds[-1]
 
-        loss_dict['l_pix'] = l_pix
+            loss_dict = OrderedDict()
+            l_pix = torch.tensor(0., device=self.lq.device)
+            for pred in preds:
+                if self.blind_mask is not None:
+                    diff = torch.abs(pred - self.gt)
+                    weight = 1.0 + self.blind_mask * (self.blind_weight - 1.0)
+                    l_pix = l_pix + (diff * weight).mean()
+                else:
+                    l_pix = l_pix + self.cri_pix(pred, self.gt)
 
-        l_pix.backward()
+        loss_dict['l_pix'] = l_pix.detach().item()
+
+        self.scaler.scale(l_pix).backward()
         if self.opt['train']['use_grad_clip']:
+            self.scaler.unscale_(self.optimizer_g)
             torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
-        self.optimizer_g.step()
+        self.scaler.step(self.optimizer_g)
+        self.scaler.update()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
 
