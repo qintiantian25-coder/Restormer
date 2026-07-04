@@ -74,7 +74,7 @@ train:
   scheduler:
     type: CosineAnnealingRestartCyclicLR
     periods: [50000, 50000]
-    restart_weights: [1]
+    restart_weights: [1, 1]
     eta_mins: [0.000001, 0.000001]
 
   mixing_augs:
