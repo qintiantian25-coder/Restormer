@@ -275,11 +275,23 @@ class ImageCleanModel(BaseModel):
         if with_metrics:
             for metric in self.metric_results.keys():
                 self.metric_results[metric] /= cnt
-                if metric == 'psnr':   # 假设 PSNR 指标名为 'psnr'
+                if metric == 'psnr':
                     current_metric = self.metric_results[metric]
             self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
 
-        # ========== 新增：保存最佳模型 ==========
+            # write val_log.txt
+            if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
+                val_log_path = os.path.join(self.opt['path']['experiments_root'],
+                                            'val_log.txt')
+                metric_names = sorted(self.metric_results.keys())
+                if not os.path.exists(val_log_path):
+                    with open(val_log_path, 'w') as f:
+                        f.write('iter\t' + '\t'.join(metric_names) + '\n')
+                with open(val_log_path, 'a') as f:
+                    vals = '\t'.join(f'{self.metric_results[m]:.6f}' for m in metric_names)
+                    f.write(f'{current_iter}\t{vals}\n')
+
+        # ========== 保存最佳模型 + 训练状态 ==========
         if with_metrics and 'psnr' in self.metric_results:
             current_psnr = self.metric_results['psnr']
             if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
@@ -288,6 +300,8 @@ class ImageCleanModel(BaseModel):
                     best_model_path = os.path.join(self.opt['path']['models'], 'best_model.pth')
                     net_g = self.get_bare_model(self.net_g)
                     torch.save({'params': net_g.state_dict()}, best_model_path)
+                    # 同时保存训练状态，用于续训
+                    self.save_training_state(epoch=-1, current_iter=current_iter, filename='best_model.state')
                     logger = get_root_logger()
                     logger.info(f'New best model saved with PSNR: {self.best_psnr:.4f} at iteration {current_iter}')
         # ======================================

@@ -151,8 +151,12 @@ def main():
 
     resume_state = None
     if len(states) > 0:
-        max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
-        resume_state = os.path.join(state_folder_path, max_state_file)
+        # 优先从 best_model.state 续训
+        if 'best_model.state' in states:
+            resume_state = os.path.join(state_folder_path, 'best_model.state')
+        else:
+            max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
+            resume_state = os.path.join(state_folder_path, max_state_file)
         opt['path']['resume_state'] = resume_state
 
     # load resume states if necessary
@@ -194,6 +198,15 @@ def main():
 
     # create message logger (formatted outputs)
     msg_logger = MessageLogger(opt, current_iter, tb_logger)
+
+    # train log file
+    train_log_path = osp.join(opt['path']['experiments_root'], 'train_log.txt')
+    if resume_state is None or current_iter == 0:
+        train_log = open(train_log_path, 'w')
+        train_log.write('iter\tlr\tl_pix\ttime\tdata_time\teta\n')
+    else:
+        train_log = open(train_log_path, 'a')
+    train_log_freq = opt['logger']['print_freq']
 
     # dataloader prefetcher
     prefetch_mode = opt['datasets']['train'].get('prefetch_mode')
@@ -289,6 +302,17 @@ def main():
                 log_vars.update(model.get_current_log())
                 msg_logger(log_vars)
 
+                # write train_log.txt
+                if opt['rank'] == 0:
+                    lr = model.get_current_learning_rate()[0]
+                    l_pix = model.get_current_log().get('l_pix', 0)
+                    total_time = time.time() - start_time
+                    time_avg = total_time / max(current_iter, 1)
+                    eta_sec = time_avg * (total_iters - current_iter - 1)
+                    eta_str = str(datetime.timedelta(seconds=int(eta_sec)))
+                    train_log.write(f'{current_iter}\t{lr:.6e}\t{l_pix:.6e}\t{iter_time:.4f}\t{data_time:.4f}\t{eta_str}\n')
+                    train_log.flush()
+
             # save models and training states
             if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
                 logger.info('Saving models and training states.')
@@ -319,6 +343,7 @@ def main():
     if opt.get('val') is not None:
         model.validation(val_loader, current_iter, tb_logger,
                          opt['val']['save_img'])
+    train_log.close()
     if tb_logger:
         tb_logger.close()
 

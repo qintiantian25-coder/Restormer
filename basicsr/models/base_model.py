@@ -327,29 +327,32 @@ class BaseModel():
         net.load_state_dict(load_net, strict=strict)
 
     @master_only
-    def save_training_state(self, epoch, current_iter):
+    def save_training_state(self, epoch, current_iter, filename=None):
         """Save training states during training, which will be used for
         resuming.
 
         Args:
             epoch (int): Current epoch.
             current_iter (int): Current iteration.
+            filename (str, optional): Custom filename (e.g. 'best_model.state').
         """
-        if current_iter != -1:
-            state = {
-                'epoch': epoch,
-                'iter': current_iter,
-                'optimizers': [],
-                'schedulers': []
-            }
-            for o in self.optimizers:
-                state['optimizers'].append(o.state_dict())
-            for s in self.schedulers:
-                state['schedulers'].append(s.state_dict())
+        state = {
+            'epoch': epoch,
+            'iter': current_iter,
+            'optimizers': [],
+            'schedulers': []
+        }
+        for o in self.optimizers:
+            state['optimizers'].append(o.state_dict())
+        for s in self.schedulers:
+            state['schedulers'].append(s.state_dict())
+        if filename:
+            save_filename = filename
+        else:
             save_filename = f'{current_iter}.state'
-            save_path = os.path.join(self.opt['path']['training_states'],
-                                     save_filename)
-            torch.save(state, save_path)
+        save_path = os.path.join(self.opt['path']['training_states'],
+                                 save_filename)
+        torch.save(state, save_path)
 
     def resume_training(self, resume_state):
         """Reload the optimizers and schedulers for resumed training.

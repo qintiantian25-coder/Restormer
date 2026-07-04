@@ -25,7 +25,11 @@ datasets:
     pin_memory: true
     prefetch_mode: cuda
 
+    # Progressive training (单阶段)
+    mini_batch_sizes: [4]
+    iters: [100000]
     gt_size: 384
+    gt_sizes: [384]
     dataset_enlarge_ratio: 1
 
   val:
@@ -109,7 +113,7 @@ val:
 # logging settings
 logger:
   print_freq: 200
-  save_checkpoint_freq: 5000
+  save_checkpoint_freq: 200000   # 不保存中间 checkpoint，仅保留 best_model.pth
   use_tb_logger: true
   wandb:
     project: ~
