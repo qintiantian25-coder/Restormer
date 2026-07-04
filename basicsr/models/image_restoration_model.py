@@ -78,7 +78,7 @@ class ImageCleanModel(BaseModel):
         train_opt = self.opt['train']
 
         self.use_fp16 = train_opt.get('use_fp16', False)
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_fp16)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_fp16)
 
         self.ema_decay = train_opt.get('ema_decay', 0)
         if self.ema_decay > 0:
@@ -146,7 +146,7 @@ class ImageCleanModel(BaseModel):
     def optimize_parameters(self, current_iter):
         self.optimizer_g.zero_grad()
 
-        with torch.cuda.amp.autocast(enabled=self.use_fp16):
+        with torch.amp.autocast('cuda', enabled=self.use_fp16):
             preds = self.net_g(self.lq)
             if not isinstance(preds, list):
                 preds = [preds]
@@ -163,7 +163,7 @@ class ImageCleanModel(BaseModel):
                 else:
                     l_pix = l_pix + self.cri_pix(pred, self.gt)
 
-        loss_dict['l_pix'] = l_pix.detach().item()
+        loss_dict['l_pix'] = l_pix.detach()
 
         self.scaler.scale(l_pix).backward()
         if self.opt['train']['use_grad_clip']:
