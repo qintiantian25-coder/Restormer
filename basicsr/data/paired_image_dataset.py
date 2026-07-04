@@ -2,12 +2,15 @@ from torch.utils import data as data
 from torchvision.transforms.functional import normalize
 
 from basicsr.data.data_util import (paired_paths_from_folder,
+                                    paired_paths_from_folder_recursive,
                                     paired_DP_paths_from_folder,
                                     paired_paths_from_lmdb,
                                     paired_paths_from_meta_info_file)
 from basicsr.data.transforms import augment, paired_random_crop, paired_random_crop_DP, random_augmentation
 from basicsr.utils import FileClient, imfrombytes, img2tensor, padding, padding_DP, imfrombytesDP
 
+import os
+import csv
 import random
 import numpy as np
 import torch
@@ -130,6 +133,177 @@ class Dataset_PairedImage(data.Dataset):
 
     def __len__(self):
         return len(self.paths)
+
+class Dataset_PairedImage_BlindPixel(data.Dataset):
+    """Paired image dataset with blind-pixel mask from CSV files.
+
+    Scans subdirectories recursively to find paired LQ/GT images.
+    Loads blind-pixel coordinates from per-sequence CSV files and
+    builds a binary mask that undergoes the same random crop and
+    geometric augmentations as the images.
+
+    Expected folder structure::
+
+        dataroot_lq/001/frame_0001.png ...
+        dataroot_gt/001/frame_0001.png ...
+        dataroot_mask/001/blind_pixel_coords.csv ...
+
+    CSV format: x, y, original_gray, simulated_gray (with header).
+
+    YAML keys:
+        dataroot_gt (str): GT (clean) image root.
+        dataroot_lq (str): LQ (noisy / blind-pixel) image root.
+        dataroot_mask (str): root folder containing per-sequence subdirs
+            each with a ``blind_pixel_coords.csv``.
+        in_ch (int): 1 for grayscale, 3 for RGB.  Default 3.
+        blind_weight (float): loss weight multiplier at blind-pixel
+            positions.  Default 10.0.
+    """
+
+    def __init__(self, opt):
+        super().__init__()
+        self.opt = opt
+        self.file_client = None
+        self.io_backend_opt = opt['io_backend']
+        self.mean = opt.get('mean', None)
+        self.std = opt.get('std', None)
+        self.in_ch = opt.get('in_ch', 3)
+        self.blind_weight = float(opt.get('blind_weight', 10.0))
+
+        self.gt_folder = opt['dataroot_gt']
+        self.lq_folder = opt['dataroot_lq']
+        self.mask_root = opt.get('dataroot_mask', None)
+        self.filename_tmpl = opt.get('filename_tmpl', '{}')
+
+        self.paths = paired_paths_from_folder_recursive(
+            [self.lq_folder, self.gt_folder], ['lq', 'gt'], self.filename_tmpl)
+
+        if self.opt['phase'] == 'train':
+            self.geometric_augs = opt.get('geometric_augs', True)
+
+        # Pre-load all CSV masks  {subdir: np.ndarray (H, W) float32}
+        self._masks = {}
+        if self.mask_root and os.path.isdir(self.mask_root):
+            for sub in sorted(os.listdir(self.mask_root)):
+                csv_path = os.path.join(self.mask_root, sub, 'blind_pixel_coords.csv')
+                if not os.path.isfile(csv_path):
+                    continue
+                coords = self._read_csv_coords(csv_path)
+                if coords.size == 0:
+                    continue
+                # Image dimensions – read from first lq image in this subdir
+                img_h, img_w = self._probe_image_size(sub)
+                mask = np.zeros((img_h, img_w), dtype=np.float32)
+                xs = coords[:, 0]
+                ys = coords[:, 1]
+                valid = (xs >= 0) & (xs < img_w) & (ys >= 0) & (ys < img_h)
+                mask[ys[valid], xs[valid]] = 1.0
+                self._masks[sub] = mask
+
+    def _read_csv_coords(self, csv_path):
+        rows = []
+        with open(csv_path, 'r', encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    rows.append((int(float(row['x'])), int(float(row['y']))))
+                except (KeyError, ValueError):
+                    continue
+        if not rows:
+            return np.empty((0, 2), dtype=np.int32)
+        return np.unique(np.array(rows, dtype=np.int32), axis=0)
+
+    def _probe_image_size(self, subdir):
+        lq_sub = os.path.join(self.lq_folder, subdir)
+        if os.path.isdir(lq_sub):
+            names = sorted(os.listdir(lq_sub))
+            if names:
+                probe = cv2.imread(os.path.join(lq_sub, names[0]), cv2.IMREAD_GRAYSCALE)
+                if probe is not None:
+                    return probe.shape[:2]
+        # fallback – will be clipped later if wrong
+        return 512, 640
+
+    def _load_image(self, path):
+        img_bytes = self.file_client.get(path, 'lq')
+        if self.in_ch == 1:
+            img = imfrombytes(img_bytes, flag='grayscale', float32=True)
+            img = np.expand_dims(img, axis=2)
+        else:
+            img = imfrombytes(img_bytes, float32=True)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return img
+
+    def __getitem__(self, index):
+        if self.file_client is None:
+            self.file_client = FileClient(
+                self.io_backend_opt.pop('type'), **self.io_backend_opt)
+
+        scale = self.opt['scale']
+        index = index % len(self.paths)
+
+        gt_path = self.paths[index]['gt_path']
+        lq_path = self.paths[index]['lq_path']
+
+        img_gt = self._load_image(gt_path)
+        img_lq = self._load_image(lq_path)
+
+        # Lookup mask by subdirectory name
+        subdir = os.path.basename(os.path.dirname(lq_path))
+        img_mask = self._masks.get(subdir)
+        if img_mask is not None:
+            img_mask = img_mask.copy()
+        else:
+            img_mask = np.zeros(img_lq.shape[:2], dtype=np.float32)
+
+        # --- training augmentations (mask follows same ops) ---
+        if self.opt['phase'] == 'train':
+            gt_size = self.opt['gt_size']
+
+            # padding
+            h, w = img_lq.shape[:2]
+            h_pad = max(0, gt_size - h)
+            w_pad = max(0, gt_size - w)
+            if h_pad > 0 or w_pad > 0:
+                img_lq = cv2.copyMakeBorder(img_lq, 0, h_pad, 0, w_pad, cv2.BORDER_REFLECT)
+                img_gt = cv2.copyMakeBorder(img_gt, 0, h_pad, 0, w_pad, cv2.BORDER_REFLECT)
+                img_mask = cv2.copyMakeBorder(img_mask, 0, h_pad, 0, w_pad, cv2.BORDER_REFLECT)
+
+            # random crop with same coordinates
+            h, w = img_lq.shape[:2]
+            top = random.randint(0, h - gt_size)
+            left = random.randint(0, w - gt_size)
+            img_lq = img_lq[top:top + gt_size, left:left + gt_size, ...]
+            img_gt = img_gt[top:top + gt_size, left:left + gt_size, ...]
+            img_mask = img_mask[top:top + gt_size, left:left + gt_size]
+
+            # geometric augmentations (same for all three)
+            if self.geometric_augs:
+                if img_mask.ndim == 2:
+                    img_mask = np.expand_dims(img_mask, axis=2)
+                img_gt, img_lq, img_mask = random_augmentation(img_gt, img_lq, img_mask)
+                img_mask = img_mask.squeeze(-1)
+
+        # BGR -> RGB, HWC -> CHW, numpy -> tensor  (grayscale handled by in_ch)
+        if self.in_ch == 1:
+            img_gt = torch.from_numpy(img_gt[..., 0]).unsqueeze(0).float()
+            img_lq = torch.from_numpy(img_lq[..., 0]).unsqueeze(0).float()
+        else:
+            img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=True, float32=True)
+
+        img_mask = torch.from_numpy(np.ascontiguousarray(img_mask)).unsqueeze(0).float()
+
+        return {
+            'lq': img_lq,
+            'gt': img_gt,
+            'mask': img_mask,
+            'lq_path': lq_path,
+            'gt_path': gt_path,
+        }
+
+    def __len__(self):
+        return len(self.paths)
+
 
 class Dataset_GaussianDenoising(data.Dataset):
     """Paired image dataset for image restoration.

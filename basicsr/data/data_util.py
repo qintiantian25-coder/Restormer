@@ -250,6 +250,42 @@ def paired_paths_from_folder(folders, keys, filename_tmpl):
                   (f'{gt_key}_path', gt_path)]))
     return paths
 
+def paired_paths_from_folder_recursive(folders, keys, filename_tmpl):
+    """Generate paired paths from folders with recursive subdirectory scanning.
+
+    Scans each folder recursively and pairs images that share the same
+    relative path under their respective roots.
+
+    Args:
+        folders (list[str]): [input_folder, gt_folder].
+        keys (list[str]): ['lq', 'gt'].
+        filename_tmpl (str): Template for each filename.
+
+    Returns:
+        list[dict]: Paired path dicts.
+    """
+    assert len(folders) == 2
+    assert len(keys) == 2
+    input_folder, gt_folder = folders
+    input_key, gt_key = keys
+
+    input_paths = sorted(list(scandir(input_folder, recursive=True)))
+    gt_paths = sorted(list(scandir(gt_folder, recursive=True)))
+
+    paths = []
+    for in_path in input_paths:
+        basename, ext = osp.splitext(osp.basename(in_path))
+        gt_name = f'{filename_tmpl.format(basename)}{ext}'
+        gt_rel = osp.join(osp.dirname(in_path), gt_name)
+        if gt_rel not in gt_paths:
+            continue
+        paths.append({
+            f'{input_key}_path': osp.join(input_folder, in_path),
+            f'{gt_key}_path': osp.join(gt_folder, gt_rel),
+        })
+    return paths
+
+
 def paired_DP_paths_from_folder(folders, keys, filename_tmpl):
     """Generate paired paths from folders.
 

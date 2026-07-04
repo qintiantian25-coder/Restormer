@@ -64,6 +64,9 @@ class ImageCleanModel(BaseModel):
             self.load_network(self.net_g, load_path,
                               self.opt['path'].get('strict_load_g', True), param_key=self.opt['path'].get('param_key', 'params'))
 
+        self.blind_weight = float(self.opt['train'].get('blind_weight', 0.0))
+        self.blind_mask = None
+
         if self.is_train:
             self.init_training_settings()
 
@@ -123,11 +126,19 @@ class ImageCleanModel(BaseModel):
             self.gt = data['gt'].to(self.device)
         if self.mixing_flag:
             self.gt, self.lq = self.mixing_augmentation(self.gt, self.lq)
+        if 'mask' in data and self.blind_weight > 0:
+            self.blind_mask = data['mask'].to(self.device)
+        else:
+            self.blind_mask = None
 
     def feed_data(self, data):
         self.lq = data['lq'].to(self.device)
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
+        if 'mask' in data and self.blind_weight > 0:
+            self.blind_mask = data['mask'].to(self.device)
+        else:
+            self.blind_mask = None
 
     def optimize_parameters(self, current_iter):
         self.optimizer_g.zero_grad()
@@ -140,7 +151,12 @@ class ImageCleanModel(BaseModel):
         loss_dict = OrderedDict()
         l_pix = 0.
         for pred in preds:
-            l_pix += self.cri_pix(pred, self.gt)
+            if self.blind_mask is not None:
+                diff = torch.abs(pred - self.gt)
+                weight = 1.0 + self.blind_mask * (self.blind_weight - 1.0)
+                l_pix += (diff * weight).mean()
+            else:
+                l_pix += self.cri_pix(pred, self.gt)
 
         loss_dict['l_pix'] = l_pix
 
