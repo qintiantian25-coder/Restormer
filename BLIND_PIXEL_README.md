@@ -47,38 +47,70 @@ data5/
 | 优化器 | AdamW, lr=3e-4, weight_decay=1e-3 |
 | 学习率 | CosineAnnealingRestartCyclicLR, 两周期各 50k |
 | 总迭代 | 100000 |
-| 精度 | fp16 |
+| 精度 | fp16 (AMP autocast + GradScaler) |
 | 增强 | geometric_augs (8 种翻转/旋转) |
-| 保存频率 | 每 5000 iter 保存 checkpoint + best_model.pth |
+| 保存 | 仅 best_model.pth，PSNR 提升时更新 |
+
+验证指标变化：
+
+| iter | PSNR | SSIM |
+|------|------|------|
+| 4k | 34.38 | 0.8807 |
+| 20k | 39.72 | 0.9526 |
+| 40k | 41.52 | 0.9662 |
+| 48k | 41.72 | 0.9676 | ← 第一周期最佳 |
+| 52k | 40.78 | 0.9629 | ← lr 重启 (余弦退火复位) |
+| 72k | 41.82 | 0.9682 | |
+| 100k | **42.76** | **0.9741** | ← 最终 |
 
 如果盲元修复效果不理想，可以在 YAML 中加 `dataroot_mask` 和 `blind_weight: 10.0` 启用加权 loss（无需改代码）。
 
-## 推理
+### 续训
+
+训练中断或想继续训练，直接重新运行训练命令即可，自动从 `best_model.state` 恢复：
 
 ```bash
-# 全图一次推理 (94G 显存推荐)
-python infer_blind_pixel.py \
-    --input ceshi_full.png \
-    --output restored.png \
-    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
+./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
+```
 
-# 分块推理 (备选，显存不够时使用)
+### 监控
+
+```bash
+tensorboard --logdir experiments/RealDenosing_BlindPixel_Gray_NoMask/tb_logger
+
+# 或直接查看日志
+cat experiments/RealDenosing_BlindPixel_Gray_NoMask/train_log.txt
+cat experiments/RealDenosing_BlindPixel_Gray_NoMask/val_log.txt
+```
+
+## 推理
+
+分块推理 + 羽化融合，拼缝无痕。每块输出进度、耗时、显存。
+
+```bash
+# RTX 6000 Pro (48G) — 推荐
 python infer_blind_pixel.py \
     --input ceshi_full.png \
     --output restored.png \
     --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth \
-    --tile 2048 --tile_overlap 64
+    --tile 3072 --tile_overlap 128
+
+# 其他显卡参考
+python infer_blind_pixel.py --input ceshi_full.png --output restored.png \
+    --weights .../best_model.pth --tile 1024 --tile_overlap 128   # <24G 显存
+python infer_blind_pixel.py --input ceshi_full.png --output restored.png \
+    --weights .../best_model.pth --tile 2048 --tile_overlap 128   # 24-40G 显存
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `--input` | 6000×6000 含盲元图像 |
-| `--output` | 修复后的输出路径 |
-| `--weights` | 训练产出的 .pth 文件 |
-| `--tile` | 分块大小 (8 的倍数)，不指定则全图推理 |
-| `--tile_overlap` | 块间重叠像素，默认 64 |
+| `--input` | 原始含盲元图像 |
+| `--output` | 修复后保存路径 |
+| `--weights` | best_model.pth 路径 |
+| `--tile` | 分块大小 (8 的倍数)，默认 1024 |
+| `--tile_overlap` | 块间重叠像素，默认 128 |
 
-## 为什么分块训练 + 全图推理可行
+## 为什么分块训练 + 分块推理可行
 
 Restormer 是全卷积网络，所有操作都与输入尺寸无关：
 
@@ -87,22 +119,17 @@ Restormer 是全卷积网络，所有操作都与输入尺寸无关：
 - **没有位置编码** — 没有 learnable positional embedding
 - 3 次 PixelUnshuffle(2) 下采样 → 输入必须是 8 的倍数
 
-## 显存估算
+推理使用 **raised-cosine 羽化融合**，每个 tile 边缘权重渐变到 0，消除拼缝。
 
-| 阶段 | 尺寸 | 最大特征图 |
-|------|------|-----------|
-| 训练 (fp16) | 384×384 | ~100 MB |
-| 推理 全图 | 6000×6000 | ~7 GB (fp16) / ~14 GB (fp32) |
+## 文件说明
 
-94G 显存下 6000×6000 全图推理绰绰有余，不需要分块。
-
-## 监控
-
-```bash
-tensorboard --logdir experiments/RealDenosing_BlindPixel_Gray_NoMask/tb_logger
-```
-
-关注：
-- `l_pix` 持续下降 → 正常
-- `metrics/psnr` 验证集上升 → 正常
-- `metrics/psnr` 不升反降 + l_pix 还在降 → 过拟合，需要更强正则化
+| 文件 | 用途 |
+|------|------|
+| `basicsr/data/data_util.py` | 新增 `paired_paths_from_folder_recursive` |
+| `basicsr/data/paired_image_dataset.py` | 新增 `Dataset_PairedImage_BlindPixel`，支持子目录扫描 |
+| `basicsr/models/image_restoration_model.py` | fp16 AMP + best_model 保存 + 加权 loss + val_log |
+| `basicsr/models/base_model.py` | `save_training_state` 支持自定义文件名 |
+| `basicsr/train.py` | train_log + best_model.state 优先续训 |
+| `Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml` | 训练配置 |
+| `infer_blind_pixel.py` | 推理脚本 (分块+羽化融合+进度输出) |
+| `train.sh` | 单卡非分布式启动 |
