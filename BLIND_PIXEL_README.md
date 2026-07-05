@@ -4,14 +4,14 @@
 
 ```
 ceshi_full.png              # 6000×6000 原始图像 (含盲元，未修复)
-GT.png                      # 6000×6000 传统方法修复结果
+GT.png                      # 2048×2048 无噪声 GT → resize 到 GT_6000.png
 
 data5/
 ├── train_blur/   001..006/ frame_0001~0054.png   (6序列, 48-54帧)
-├── train_sharp/  001..006/ (一一对应)
-├── test_blur/    001..004/ frame_0001~0053.png   (4序列, 47-53帧)
+├── train_sharp/  001..006/ (一一对应, 无噪声 GT)
+├── test_blur/    001..004/ frame_0001~0052.png   (4序列, 51-52帧)
 ├── test_sharp/   001..004/
-├── val_blur/     001..002/ frame_0001~0051.png   (2序列, 48-51帧)
+├── val_blur/     001..002/ frame_0001~0052.png   (2序列, 50-52帧)
 └── val_sharp/    001..002/
 ```
 
@@ -21,7 +21,7 @@ data5/
 | 通道 | 1 (灰度) |
 | 划分 | train 6 / test 4 / val 2 |
 | blur 来源 | ceshi_full.png 上直接裁剪（盲元可见） |
-| sharp 来源 | GT.png 同一位置裁剪（传统方法修复） |
+| sharp 来源 | GT.png 同一位置裁剪（无噪声真值） |
 
 ## 训练
 
@@ -45,19 +45,11 @@ data5/
 | gt_size | 384 |
 | Batch size | 4 / GPU |
 | 优化器 | AdamW, lr=3e-4, weight_decay=1e-3 |
-| 学习率 | CosineAnnealingRestartCyclicLR, 两周期各 50k |
-| 总迭代 | 100000 |
+| 学习率 | CosineAnnealingRestartCyclicLR, 三周期各 50k |
+| 总迭代 | 150000 |
 | 精度 | fp16 (autocast + GradScaler) |
 | 增强 | geometric_augs |
 | 保存 | 仅 best_model.pth，PSNR 提升时更新 |
-
-| iter | PSNR | SSIM |
-|------|------|------|
-| 4k | 34.38 | 0.8807 |
-| 20k | 39.72 | 0.9526 |
-| 48k | 41.72 | 0.9676 | ← 第一周期最佳 |
-| 52k | 40.78 | 0.9629 | ← lr 重启 |
-| 100k | **42.76** | **0.9741** | ← 最终 |
 
 ### 第二阶段：加权 loss（如果盲元残影明显）
 
@@ -161,4 +153,5 @@ python generate_masks.py --root data5 --split train --threshold 30 --visualize
 | `infer_blind_pixel.py` | 全图分块推理 |
 | `eval_test.py` | 测试集批量评估 (PSNR/SSIM) |
 | `generate_masks.py` | 盲元 mask 自动检测 |
+| `resize_gt.py` | GT 图像缩放 |
 | `train.sh` | 单卡非分布式启动 |
