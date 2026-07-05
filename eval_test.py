@@ -76,10 +76,14 @@ def main():
             else:
                 pred = blur
 
-            if args.save and model is not None:
+            if args.save:
                 save_dir = os.path.join(args.save, seq)
                 os.makedirs(save_dir, exist_ok=True)
-                cv2.imwrite(os.path.join(save_dir, fname), pred)
+                if model is not None:
+                    compare = np.hstack([blur, pred, sharp])  # blur | restored | GT
+                else:
+                    compare = np.hstack([blur, blur, sharp])  # blur | blur | GT
+                cv2.imwrite(os.path.join(save_dir, fname), compare)
 
             psnr = peak_signal_noise_ratio(sharp, pred, data_range=255)
             ssim = structural_similarity(sharp, pred, data_range=255)
