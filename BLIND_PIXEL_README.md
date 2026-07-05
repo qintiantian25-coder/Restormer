@@ -25,7 +25,17 @@ data5/
 
 ## 训练
 
-### 第一阶段：无 mask baseline
+### 重新训练（clean GT，从头开始）
+
+```bash
+# 1. 删除旧实验目录（干净 GT 不需要旧权重）
+rm -rf experiments/RealDenosing_BlindPixel_Gray_NoMask
+
+# 2. 开始训练
+./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
+```
+
+### 续训
 
 ```bash
 ./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
@@ -68,14 +78,6 @@ python generate_masks.py --root data5 --split val --threshold 30
 ```
 
 mask 位置 loss 权重 10×，从 NoMask best_model 续训。阈值可用 `--visualize` 检查调整。
-
-### 续训
-
-直接重新运行训练命令，自动从 `best_model.state` 恢复：
-
-```bash
-./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
-```
 
 ### 监控
 
