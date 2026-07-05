@@ -85,21 +85,22 @@ cat experiments/RealDenosing_BlindPixel_Gray_NoMask/val_log.txt
 
 ## 推理
 
-分块推理 + 羽化融合，拼缝无痕。每块输出进度、耗时、显存。
+默认 640×512 分块（与训练数据同尺寸），fp16 推理，每块输出进度。均匀加权融合，拼缝无痕。
 
 ```bash
-# RTX 6000 Pro (48G) — 推荐
+# 默认 640×512 分块 (推荐，与训练一致)
 python infer_blind_pixel.py \
     --input ceshi_full.png \
     --output restored.png \
-    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth \
-    --tile 3072 --tile_overlap 128
+    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
 
-# 其他显卡参考
+# 方形大块 (更快)
 python infer_blind_pixel.py --input ceshi_full.png --output restored.png \
-    --weights .../best_model.pth --tile 1024 --tile_overlap 128   # <24G 显存
+    --weights .../best_model.pth --tile 2048 --tile_overlap 128
+
+# 自定义尺寸
 python infer_blind_pixel.py --input ceshi_full.png --output restored.png \
-    --weights .../best_model.pth --tile 2048 --tile_overlap 128   # 24-40G 显存
+    --weights .../best_model.pth --tile_w 640 --tile_h 512 --tile_overlap 128
 ```
 
 | 参数 | 说明 |
@@ -107,8 +108,10 @@ python infer_blind_pixel.py --input ceshi_full.png --output restored.png \
 | `--input` | 原始含盲元图像 |
 | `--output` | 修复后保存路径 |
 | `--weights` | best_model.pth 路径 |
-| `--tile` | 分块大小 (8 的倍数)，默认 1024 |
+| `--tile_w / --tile_h` | 分块尺寸 (8 的倍数)，默认 640×512 |
+| `--tile` | 方形分块快捷方式 |
 | `--tile_overlap` | 块间重叠像素，默认 128 |
+| `--fp32` | 强制 fp32 (默认 fp16) |
 
 ## 为什么分块训练 + 分块推理可行
 
@@ -119,7 +122,7 @@ Restormer 是全卷积网络，所有操作都与输入尺寸无关：
 - **没有位置编码** — 没有 learnable positional embedding
 - 3 次 PixelUnshuffle(2) 下采样 → 输入必须是 8 的倍数
 
-推理使用 **raised-cosine 羽化融合**，每个 tile 边缘权重渐变到 0，消除拼缝。
+默认使用 640×512 分块与训练数据尺寸一致，模型对该分辨率拟合最充分。均匀加权融合借助 block overlap 消除拼缝。
 
 ## 文件说明
 
