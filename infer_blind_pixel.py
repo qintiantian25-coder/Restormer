@@ -19,29 +19,28 @@ import torch.nn.functional as F
 from basicsr.models.archs.restormer_arch import Restormer
 
 
-def _tiled_forward(model, x, tile, overlap, device, use_fp16):
-    """Tiled forward with uniform-weight blending (no feathering needed
-    when overlap is large enough and model is consistent)."""
+def _tiled_forward(model, x, tile_h, tile_w, overlap, device, use_fp16):
+    """Tiled forward with uniform-weight blending."""
     b, c, h, w = x.shape
-    tile = min(tile, h, w)
-    stride = tile - overlap
+    th = min(tile_h, h)
+    tw = min(tile_w, w)
+    stride_h = th - overlap
+    stride_w = tw - overlap
 
-    # Force consistent stride: all tiles share the same offset pattern
-    h_starts = list(range(0, h - tile + 1, stride))
-    w_starts = list(range(0, w - tile + 1, stride))
-    # Cover trailing pixels
-    if h_starts and h_starts[-1] + tile < h:
-        h_starts.append(h - tile)
-    if not h_starts:
-        h_starts = [0]
-    if w_starts and w_starts[-1] + tile < w:
-        w_starts.append(w - tile)
-    if not w_starts:
-        w_starts = [0]
+    def _starts(dim, t, stride):
+        s = list(range(0, dim - t + 1, stride))
+        if s and s[-1] + t < dim:
+            s.append(dim - t)
+        if not s:
+            s = [0]
+        return s
+
+    h_starts = _starts(h, th, stride_h)
+    w_starts = _starts(w, tw, stride_w)
 
     total = len(h_starts) * len(w_starts)
     print(f'Tiles: {len(h_starts)} rows x {len(w_starts)} cols = {total}')
-    print(f'Tile: {tile}  overlap: {overlap}  stride: {stride}')
+    print(f'Tile: {th}x{tw}  overlap: {overlap}  stride: {stride_h}x{stride_w}')
     print(f'Padded image: {w}x{h}  fp16: {use_fp16}')
 
     accum = torch.zeros(b, c, h, w, device=device)
@@ -52,7 +51,7 @@ def _tiled_forward(model, x, tile, overlap, device, use_fp16):
 
     for y0 in h_starts:
         for x0 in w_starts:
-            patch = x[..., y0:y0 + tile, x0:x0 + tile]
+            patch = x[..., y0:y0 + th, x0:x0 + tw]
 
             with torch.no_grad():
                 if use_fp16:
@@ -62,8 +61,8 @@ def _tiled_forward(model, x, tile, overlap, device, use_fp16):
                     out = model(patch)
 
             out = torch.clamp(out, 0, 1)
-            accum[..., y0:y0 + tile, x0:x0 + tile] += out
-            count[..., y0:y0 + tile, x0:x0 + tile] += 1.0
+            accum[..., y0:y0 + th, x0:x0 + tw] += out
+            count[..., y0:y0 + th, x0:x0 + tw] += 1.0
 
             torch.cuda.empty_cache()
 
@@ -87,15 +86,20 @@ def main():
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--weights', required=True)
-    parser.add_argument('--tile', type=int, default=2048)
+    parser.add_argument('--tile', type=int, default=0,
+                        help='Square tile size (e.g. 2048).  Overrides --tile_w/--tile_h')
+    parser.add_argument('--tile_w', type=int, default=640,
+                        help='Tile width (default 640, multiple of 8)')
+    parser.add_argument('--tile_h', type=int, default=512,
+                        help='Tile height (default 512, multiple of 8)')
     parser.add_argument('--tile_overlap', type=int, default=128)
-    parser.add_argument('--fp16', action='store_true', default=True,
-                        help='Use fp16 autocast (default: on)')
-    parser.add_argument('--fp32', action='store_false', dest='fp16',
-                        help='Force fp32 inference')
+    parser.add_argument('--fp16', action='store_true', default=True)
+    parser.add_argument('--fp32', action='store_false', dest='fp16')
     args = parser.parse_args()
 
-    assert args.tile % 8 == 0, 'tile must be a multiple of 8'
+    if args.tile > 0:
+        args.tile_w = args.tile_h = args.tile
+    assert args.tile_w % 8 == 0 and args.tile_h % 8 == 0, 'tile must be multiple of 8'
     assert args.tile_overlap >= 32, 'overlap too small'
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -145,8 +149,8 @@ def main():
     img_t = F.pad(img_t, (0, pad_w, 0, pad_h), 'reflect')
 
     # --- tiled inference ---
-    restored = _tiled_forward(model, img_t, args.tile, args.tile_overlap,
-                              device, args.fp16)
+    restored = _tiled_forward(model, img_t, args.tile_h, args.tile_w,
+                              args.tile_overlap, device, args.fp16)
 
     # --- unpad, save ---
     restored = restored[:, :, :h_in, :w_in]
