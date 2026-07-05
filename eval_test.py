@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--blur', default='data5/test_blur')
     parser.add_argument('--sharp', default='data5/test_sharp')
     parser.add_argument('--no_model', action='store_true', help='Evaluate blur vs sharp (no model)')
+    parser.add_argument('--save', default=None, help='Save restored images to dir')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -74,6 +75,11 @@ def main():
                 pred = (out.squeeze().cpu().numpy() * 255).astype(np.uint8)
             else:
                 pred = blur
+
+            if args.save and model is not None:
+                save_dir = os.path.join(args.save, seq)
+                os.makedirs(save_dir, exist_ok=True)
+                cv2.imwrite(os.path.join(save_dir, fname), pred)
 
             psnr = peak_signal_noise_ratio(sharp, pred, data_range=255)
             ssim = structural_similarity(sharp, pred, data_range=255)
