@@ -248,12 +248,27 @@ class Dataset_PairedImage_BlindPixel(data.Dataset):
         img_gt = self._load_image(gt_path)
         img_lq = self._load_image(lq_path)
 
-        # Lookup mask by subdirectory name
+        # Load mask: try per-image PNG first, then CSV, then zero
         subdir = os.path.basename(os.path.dirname(lq_path))
-        img_mask = self._masks.get(subdir)
-        if img_mask is not None:
-            img_mask = img_mask.copy()
-        else:
+        img_mask = None
+
+        # 1) per-image PNG mask
+        if self.mask_root:
+            fname = os.path.basename(lq_path)
+            png_mask_path = os.path.join(self.mask_root, subdir, fname)
+            if os.path.isfile(png_mask_path):
+                m = cv2.imread(png_mask_path, cv2.IMREAD_GRAYSCALE)
+                if m is not None:
+                    img_mask = m.astype(np.float32) / 255.0  # [0,1]
+
+        # 2) per-sequence CSV lookup
+        if img_mask is None:
+            cached = self._masks.get(subdir)
+            if cached is not None:
+                img_mask = cached.copy()
+
+        # 3) fallback – no mask
+        if img_mask is None:
             img_mask = np.zeros(img_lq.shape[:2], dtype=np.float32)
 
         # --- training augmentations (mask follows same ops) ---
