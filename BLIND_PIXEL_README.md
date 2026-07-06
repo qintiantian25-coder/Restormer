@@ -89,7 +89,37 @@ cat experiments/RealDenosing_BlindPixel_Gray_NoMask/val_log.txt
 
 ## 推理
 
-### 单张全图
+### Raw 文件一键处理（推荐）
+
+直接处理原始 .raw 文件，含完整预处理管线：
+
+```bash
+# Windows 原生 CMD/PowerShell
+python pipeline_raw_to_restored.py \
+    --raw_dir "E:\\DD数据\\YD背景100帧" \
+    --calib "E:\\DD数据\\非均匀校正系数\\YD_SW_A_D_72000_4hz_xs.mat" \
+    --output_dir "E:\\DD数据\\results" \
+    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
+
+# WSL
+python pipeline_raw_to_restored.py \
+    --raw_dir "/mnt/e/DD数据/YD背景100帧" \
+    --calib "/mnt/e/DD数据/非均匀校正系数/YD_SW_A_D_72000_4hz_xs.mat" \
+    --output_dir "/mnt/e/DD数据/results" \
+    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
+```
+
+管线：`raw(u16) → NUC → 条纹抑制 → 对比度增强(gamma 0.6) → Restormer分块推理 → PNG`
+
+| 参数 | 说明 |
+|------|------|
+| `--raw_dir` | .raw 文件目录 |
+| `--calib` | NUC 标定 .mat 文件 (kk/bb) |
+| `--output_dir` | 结果保存目录 |
+| `--weights` | 训练好的模型权重 |
+| `--tile_h / --tile_w` | 推理分块尺寸，默认 640×512 |
+
+### 单张 PNG 全图
 
 默认 640×512 分块 (与训练一致)，fp16，均匀加权融合：
 
@@ -155,5 +185,9 @@ python generate_masks.py --root data5 --split train --threshold 30 --visualize
 | `infer_blind_pixel.py` | 全图分块推理 |
 | `eval_test.py` | 测试集批量评估 (PSNR/SSIM) |
 | `generate_masks.py` | 盲元 mask 自动检测 |
+| `pipeline_raw_to_restored.py` | Raw 文件一键处理 (NUC+条纹抑制+Restormer) |
 | `resize_gt.py` | GT 图像缩放 |
+| `generate_masks.py` | 盲元 mask 自动检测 |
 | `train.sh` | 单卡非分布式启动 |
+
+> **依赖**：`pipeline_raw_to_restored.py` 需要 `scipy` 和 `h5py`（MATLAB v7.3 .mat 文件）。WSL 下需重新挂载 USB 盘：`sudo umount /mnt/e; sudo mount -t drvfs E: /mnt/e`
