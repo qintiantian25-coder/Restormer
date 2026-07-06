@@ -37,7 +37,29 @@ rm -rf experiments/RealDenosing_BlindPixel_Gray_NoMask
 
 ### 续训
 
+中断后直接重新运行，自动从 `best_model.state` 恢复：
+
 ```bash
+./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
+```
+
+### 增加训练数据
+
+新增序列直接放入对应子目录，无需改代码或配置——数据集每次启动自动递归扫描：
+
+```bash
+# 1. 放入新数据 (007/008)
+cp -r /path/to/new/007 data5/train_blur/007
+cp -r /path/to/new/007 data5/train_sharp/007
+cp -r /path/to/new/008 data5/train_blur/008
+cp -r /path/to/new/008 data5/train_sharp/008
+
+# 2. 验证配对
+for s in 007 008; do
+  echo "train $s: blur=$(ls data5/train_blur/$s/*.png 2>/dev/null | wc -l)  sharp=$(ls data5/train_sharp/$s/*.png 2>/dev/null | wc -l)"
+done
+
+# 3. 续训 (total_iter 已从 150k → 200k，自动扫描新数据)
 ./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
 ```
 
@@ -55,8 +77,8 @@ rm -rf experiments/RealDenosing_BlindPixel_Gray_NoMask
 | gt_size | 384 |
 | Batch size | 4 / GPU |
 | 优化器 | AdamW, lr=3e-4, weight_decay=1e-3 |
-| 学习率 | CosineAnnealingRestartCyclicLR, 三周期各 50k |
-| 总迭代 | 150000 |
+| 学习率 | CosineAnnealingRestartCyclicLR, 四周期各 50k |
+| 总迭代 | 200000 |
 | 精度 | fp16 (autocast + GradScaler) |
 | 增强 | geometric_augs |
 | 保存 | 仅 best_model.pth，PSNR 提升时更新 |
