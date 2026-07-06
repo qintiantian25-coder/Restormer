@@ -158,8 +158,14 @@ def check_resume(opt, resume_iter):
             basename = network.replace('network_', '')
             if opt['path'].get('ignore_resume_networks') is None or (
                     basename not in opt['path']['ignore_resume_networks']):
-                opt['path'][name] = osp.join(
-                    opt['path']['models'], f'net_{basename}_{resume_iter}.pth')
+                # best_model.state → load best_model.pth
+                resume_file = os.path.basename(opt['path']['resume_state'])
+                if resume_file == 'best_model.state':
+                    model_file = osp.join(opt['path']['models'], 'best_model.pth')
+                else:
+                    model_file = osp.join(
+                        opt['path']['models'], f'net_{basename}_{resume_iter}.pth')
+                opt['path'][name] = model_file
                 logger.info(f"Set {name} to {opt['path'][name]}")
 
 
