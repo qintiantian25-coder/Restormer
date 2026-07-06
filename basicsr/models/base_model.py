@@ -369,7 +369,9 @@ class BaseModel():
         for i, o in enumerate(resume_optimizers):
             self.optimizers[i].load_state_dict(o)
         for i, s in enumerate(resume_schedulers):
-            self.schedulers[i].load_state_dict(s)
+            # Only restore last_epoch — keep YAML's period config
+            self.schedulers[i].last_epoch = s.get('last_epoch',
+                                                   resume_state['iter'])
 
     def reduce_loss_dict(self, loss_dict):
         """reduce loss dict.
