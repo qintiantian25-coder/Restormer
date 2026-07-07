@@ -63,31 +63,46 @@ def read_raw(path, rows=6000, cols=6000):
     return arr.astype(np.float64)
 
 
-def preprocess(frame, K, B):
-    """Apply NUC → stripe suppression → contrast enhancement → uint8."""
+def preprocess(frame, K, B, stripe_degree=5, stripe_mode='poly'):
+    """Apply NUC → stripe suppression → contrast enhancement → uint8.
+
+    stripe_mode:
+        'poly'  - polynomial fit (original ceshi.m)
+        'median' - median-based column/row equalisation (stronger)
+        'both'   - polynomial first, then median residual
+    """
     # [1] NUC
     data = (frame - B) / K
 
     rows, cols = data.shape
 
-    # [2] Polynomial stripe suppression
-    col_means = data.mean(axis=0)
-    x = np.arange(cols, dtype=np.float64)
-    p = np.polyfit(x, col_means, 3)
-    trend_col = np.polyval(p, x)
-    data -= (col_means - trend_col)
+    # [2] Stripe suppression
+    if stripe_mode in ('poly', 'both'):
+        col_means = data.mean(axis=0)
+        x = np.arange(cols, dtype=np.float64)
+        p = np.polyfit(x, col_means, stripe_degree)
+        trend_col = np.polyval(p, x)
+        data -= (col_means - trend_col)
 
-    row_means = data.mean(axis=1)
-    y = np.arange(rows, dtype=np.float64)
-    p_row = np.polyfit(y, row_means, 3)
-    trend_row = np.polyval(p_row, y)
-    data -= (row_means - trend_row).reshape(-1, 1)
+        row_means = data.mean(axis=1)
+        y = np.arange(rows, dtype=np.float64)
+        p_row = np.polyfit(y, row_means, stripe_degree)
+        trend_row = np.polyval(p_row, y)
+        data -= (row_means - trend_row).reshape(-1, 1)
 
-    # [3] Contrast enhancement
-    flat = np.sort(data.ravel())
-    n = len(flat)
-    lo = flat[int(0.001 * n)]
-    hi = flat[int(0.999 * n)]
+    if stripe_mode in ('median', 'both'):
+        # Median-based: subtracts median of each col/row, then smooths
+        col_med = np.median(data, axis=0)
+        col_med_smooth = np.polyval(np.polyfit(np.arange(cols), col_med, 3), np.arange(cols))
+        data -= (col_med - col_med_smooth)
+
+        row_med = np.median(data, axis=1)
+        row_med_smooth = np.polyval(np.polyfit(np.arange(rows), row_med, 3), np.arange(rows))
+        data -= (row_med - row_med_smooth).reshape(-1, 1)
+
+    # [3] Contrast enhancement (np.quantile = linear interp, matches MATLAB quantile)
+    lo = np.quantile(data, 0.001)
+    hi = np.quantile(data, 0.999)
     if hi - lo > 1e-10:
         data = (data - lo) / (hi - lo)
     data = np.clip(data, 0, 1)
@@ -177,9 +192,16 @@ def main():
     parser.add_argument('--weights', required=True, help='Trained model .pth')
     parser.add_argument('--rows', type=int, default=6000)
     parser.add_argument('--cols', type=int, default=6000)
+    parser.add_argument('--stripe_degree', type=int, default=5,
+                        help='Polynomial degree for stripe suppression (ceshi.m used 3)')
+    parser.add_argument('--stripe_mode', default='poly',
+                        choices=['poly', 'median', 'both'],
+                        help='Stripe suppression method.')
     parser.add_argument('--tile_h', type=int, default=640)
     parser.add_argument('--tile_w', type=int, default=512)
     parser.add_argument('--tile_overlap', type=int, default=128)
+    parser.add_argument('--save_pre', action='store_true',
+                        help='Also save preprocessed (pre-model) image')
     parser.add_argument('--max_frames', type=int, default=0,
                         help='Process at most N frames (0 = all)')
     args = parser.parse_args()
@@ -240,8 +262,12 @@ def main():
         print(f'{raw.shape[1]}x{raw.shape[0]}  range=[{raw.min():.0f},{raw.max():.0f}]')
         # 2) preprocess
         print(f'  [2/4] Preprocessing...', end=' ', flush=True)
-        pre = preprocess(raw, K, B)
+        pre = preprocess(raw, K, B, args.stripe_degree, args.stripe_mode)
         print(f'done  range=[{pre.min():.0f},{pre.max():.0f}]')
+        if args.save_pre:
+            pre_path = out_path.replace('.png', '_pre.png')
+            cv2.imwrite(pre_path, pre)
+            print(f'  [pre] Saved: {pre_path}')
         # 3) Restormer
         print(f'  [3/4] Restormer inference:')
         restored = run_restormer(model, pre, device,

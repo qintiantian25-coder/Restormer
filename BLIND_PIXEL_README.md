@@ -3,12 +3,10 @@
 ## 数据
 
 ```
-ceshi_full.png              # 6000×6000 原始图像 (含盲元，未修复)
-GT.png                      # 2048×2048 无噪声 GT → resize 到 GT_6000.png
-
+ceshi_full.png              # 6000×6000 (NUC+条纹抑制后，含盲元)
 data5/
-├── train_blur/   001..006/ frame_0001~0054.png   (6序列, 48-54帧)
-├── train_sharp/  001..006/ (一一对应, 无噪声 GT)
+├── train_blur/   001..008/ frame_0001~0054.png   (8序列, 48-54帧)
+├── train_sharp/  001..008/ (一一对应, 无噪声 GT)
 ├── test_blur/    001..004/ frame_0001~0052.png   (4序列, 51-52帧)
 ├── test_sharp/   001..004/
 ├── val_blur/     001..002/ frame_0001~0052.png   (2序列, 50-52帧)
@@ -83,6 +81,17 @@ done
 | 增强 | geometric_augs |
 | 保存 | 仅 best_model.pth，PSNR 提升时更新 |
 
+训练进度（最终）：
+
+| iter | PSNR | SSIM |
+|------|------|------|
+| 12k | 47.42 | 0.9975 |
+| 48k | 51.53 | 0.9987 |
+| 100k | 52.88 | 0.9989 |
+| 152k | 47.51 | — | ← 新增 007/008, lr 重启 |
+| 176k | 50.45 | 0.9973 |
+| **200k** | **51.47** | **0.9977** |
+
 ### 第二阶段：加权 loss（如果盲元残影明显）
 
 首先生成盲元 mask（基于局部中值检测，不依赖 GT 质量）：
@@ -140,6 +149,9 @@ python pipeline_raw_to_restored.py \
 | `--output_dir` | 结果保存目录 |
 | `--weights` | 训练好的模型权重 |
 | `--tile_h / --tile_w` | 推理分块尺寸，默认 640×512 |
+| `--stripe_degree` | 条纹抑制多项式阶数，默认 5 |
+| `--stripe_mode` | poly / median / both |
+| `--max_frames` | 最大处理帧数，0=全部 |
 
 ### 单张 PNG 全图
 
@@ -183,16 +195,12 @@ python eval_test.py --no_model
 
 ## 盲元分析
 
-```bash
-# 生成 restored.png 的盲元残影检测图 (红色标记)
-python gen_residual_mask.py --input restored.png
+`generate_masks.py` 基于局部中值滤波，不依赖 GT。`--threshold` 越小越敏感：
 
-# 从 blur 图像批量生成 mask
+```bash
 python generate_masks.py --root data5 --split train --threshold 30
 python generate_masks.py --root data5 --split train --threshold 30 --visualize
 ```
-
-`generate_masks.py` 基于局部中值滤波，不依赖 GT。`--threshold` 越小越敏感。
 
 ## 文件说明
 
@@ -208,8 +216,6 @@ python generate_masks.py --root data5 --split train --threshold 30 --visualize
 | `eval_test.py` | 测试集批量评估 (PSNR/SSIM) |
 | `generate_masks.py` | 盲元 mask 自动检测 |
 | `pipeline_raw_to_restored.py` | Raw 文件一键处理 (NUC+条纹抑制+Restormer) |
-| `resize_gt.py` | GT 图像缩放 |
-| `generate_masks.py` | 盲元 mask 自动检测 |
 | `train.sh` | 单卡非分布式启动 |
 
 > **依赖**：`pipeline_raw_to_restored.py` 需要 `scipy` 和 `h5py`（MATLAB v7.3 .mat 文件）。WSL 下需重新挂载 USB 盘：`sudo umount /mnt/e; sudo mount -t drvfs E: /mnt/e`
