@@ -155,6 +155,17 @@ python pipeline_raw_to_restored.py \
 | `--stripe_mode` | poly / median / both |
 | `--max_frames` | 最大处理帧数，0=全部 |
 
+### Raw 文件纯盲元处理 (无 NUC/条纹)
+
+仅对比度增强 + Restormer，不做 NUC 和条纹抑制。输出旋转 90° 的左右对比图：
+
+```bash
+python infer_raw_blind.py \
+    --raw_dir "背景数据_灯管" \
+    --output_dir "背景数据_灯管/results" \
+    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
+```
+
 ### 单张 PNG 全图
 
 默认 640×512 分块 (与训练一致)，fp16，均匀加权融合：
@@ -218,6 +229,7 @@ python generate_masks.py --root data5 --split train --threshold 30 --visualize
 | `eval_test.py` | 测试集批量评估 (PSNR/SSIM) |
 | `generate_masks.py` | 盲元 mask 自动检测 |
 | `pipeline_raw_to_restored.py` | Raw 文件一键处理 (NUC+条纹抑制+Restormer) |
+| `infer_raw_blind.py` | Raw 文件纯盲元处理 (无 NUC/条纹) |
 | `train.sh` | 单卡非分布式启动 |
 
 > **依赖**：`pipeline_raw_to_restored.py` 需要 `scipy` 和 `h5py`（MATLAB v7.3 .mat 文件）。WSL 下需重新挂载 USB 盘：`sudo umount /mnt/e; sudo mount -t drvfs E: /mnt/e`
