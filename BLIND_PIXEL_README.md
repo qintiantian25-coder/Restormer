@@ -5,8 +5,8 @@
 ```
 ceshi_full.png              # 6000×6000 (NUC+条纹抑制后，含盲元)
 data5/
-├── train_blur/   001..008/ frame_0001~0054.png   (8序列, 48-54帧)
-├── train_sharp/  001..008/ (一一对应, 无噪声 GT)
+├── train_blur/   001..010/ frame_0001~0054.png   (10序列, 48-54帧)
+├── train_sharp/  001..010/ (一一对应, 无噪声 GT)
 ├── test_blur/    001..004/ frame_0001~0052.png   (4序列, 51-52帧)
 ├── test_sharp/   001..004/
 ├── val_blur/     001..002/ frame_0001~0052.png   (2序列, 50-52帧)
@@ -75,8 +75,8 @@ done
 | gt_size | 384 |
 | Batch size | 4 / GPU |
 | 优化器 | AdamW, lr=3e-4, weight_decay=1e-3 |
-| 学习率 | CosineAnnealingRestartCyclicLR, 四周期各 50k |
-| 总迭代 | 200000 |
+| 学习率 | CosineAnnealingRestartCyclicLR, 五周期各 50k |
+| 总迭代 | 250000 |
 | 精度 | fp16 (autocast + GradScaler) |
 | 增强 | geometric_augs |
 | 保存 | 仅 best_model.pth，PSNR 提升时更新 |
@@ -90,7 +90,9 @@ done
 | 100k | 52.88 | 0.9989 |
 | 152k | 47.51 | — | ← 新增 007/008, lr 重启 |
 | 176k | 50.45 | 0.9973 |
-| **200k** | **51.47** | **0.9977** |
+| 200k | 51.47 | 0.9977 | ← 新增 009/010, lr 重启 |
+| 224k | 46.55 | 0.9972 |
+| **248k** | **47.59** | **0.9977** |
 
 ### 第二阶段：加权 loss（如果盲元残影明显）
 
@@ -149,7 +151,7 @@ python pipeline_raw_to_restored.py \
 | `--output_dir` | 结果保存目录 |
 | `--weights` | 训练好的模型权重 |
 | `--tile_h / --tile_w` | 推理分块尺寸，默认 640×512 |
-| `--stripe_degree` | 条纹抑制多项式阶数，默认 5 |
+| `--stripe_degree` | 条纹抑制多项式阶数，默认 3 |
 | `--stripe_mode` | poly / median / both |
 | `--max_frames` | 最大处理帧数，0=全部 |
 

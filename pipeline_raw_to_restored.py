@@ -192,8 +192,8 @@ def main():
     parser.add_argument('--weights', required=True, help='Trained model .pth')
     parser.add_argument('--rows', type=int, default=6000)
     parser.add_argument('--cols', type=int, default=6000)
-    parser.add_argument('--stripe_degree', type=int, default=5,
-                        help='Polynomial degree for stripe suppression (ceshi.m used 3)')
+    parser.add_argument('--stripe_degree', type=int, default=3,
+                        help='Polynomial degree for stripe suppression')
     parser.add_argument('--stripe_mode', default='poly',
                         choices=['poly', 'median', 'both'],
                         help='Stripe suppression method.')
