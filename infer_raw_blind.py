@@ -56,6 +56,7 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size=8):
 
     idx = 0; t0 = time.time()
     bs = batch_size
+    peak_mem = 0
 
     for i in range(0, len(positions), bs):
         batch_pos = positions[i:i+bs]
@@ -73,10 +74,13 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size=8):
             count[..., y0:y0+th, x0:x0+tw] += 1.0
 
         idx += len(batch_pos)
+        mem = torch.cuda.max_memory_allocated(device) / 1024**3
+        peak_mem = max(peak_mem, mem)
         if idx % (bs * 4) <= bs or idx == total:
             e = time.time() - t0
-            print(f'    tiles [{idx}/{total}] {idx/total*100:.0f}%  elapsed={e:.0f}s  eta={e/idx*(total-idx):.0f}s', flush=True)
+            print(f'    tiles [{idx}/{total}] {idx/total*100:.0f}%  elapsed={e:.0f}s  eta={e/idx*(total-idx):.0f}s  GPU_mem={mem:.1f}G', flush=True)
 
+    print(f'  Tiled forward done: {time.time()-t0:.0f}s  peak_GPU={peak_mem:.1f}G')
     return accum / count.clamp_min(1.0)
 
 
@@ -130,9 +134,11 @@ def main():
         out_rot = np.rot90(out_img, k=1)
         compare = np.hstack([pre_rot, out_rot])
         cv2.imwrite(out, compare)
-        print(f'  → {out}  ({time.time()-t0:.0f}s)')
+        dt = time.time()-t0
+        print(f'  → {os.path.basename(out)}  frame_time={dt:.0f}s', flush=True)
 
-    print(f'\nDone. {len(files)} files → {args.output_dir}  ({int(time.time()-t_total)}s)')
+    dt_total = time.time()-t_total
+    print(f'\nDone. {len(files)} files → {args.output_dir}  total={dt_total:.0f}s  avg={dt_total/len(files):.0f}s/frame', flush=True)
 
 
 if __name__ == '__main__':
