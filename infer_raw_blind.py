@@ -36,7 +36,7 @@ def contrast_only(frame):
     return (out * 255).round().clip(0, 255).astype(np.uint8)
 
 
-def tiled_forward(model, x, th, tw, overlap, device):
+def tiled_forward(model, x, th, tw, overlap, device, batch_size=8):
     b, c, h, w = x.shape
     th, tw = min(th, h), min(tw, w)
     sh, sw = th - overlap, tw - overlap
@@ -51,20 +51,32 @@ def tiled_forward(model, x, th, tw, overlap, device):
     accum = torch.zeros(b, c, h, w, device=device)
     count = torch.zeros(b, c, h, w, device=device)
 
+    # Collect all tile positions
+    positions = [(y0, x0) for y0 in hs for x0 in ws]
+
     idx = 0; t0 = time.time()
-    for y0 in hs:
-        for x0 in ws:
-            p = x[..., y0:y0+th, x0:x0+tw]
-            with torch.no_grad(), torch.amp.autocast('cuda'):
-                o = model(p)
-            o = torch.clamp(o, 0, 1)
-            accum[..., y0:y0+th, x0:x0+tw] += o
+    bs = batch_size
+
+    for i in range(0, len(positions), bs):
+        batch_pos = positions[i:i+bs]
+        patches = []
+        for y0, x0 in batch_pos:
+            patches.append(x[..., y0:y0+th, x0:x0+tw])
+        batch = torch.cat(patches, dim=0)  # [B, C, H, W]
+
+        with torch.no_grad(), torch.amp.autocast('cuda'):
+            outs = model(batch)
+        outs = torch.clamp(outs, 0, 1)
+
+        for j, (y0, x0) in enumerate(batch_pos):
+            accum[..., y0:y0+th, x0:x0+tw] += outs[j:j+1]
             count[..., y0:y0+th, x0:x0+tw] += 1.0
-            torch.cuda.empty_cache()
-            idx += 1
-            if idx % 4 == 0 or idx == total:
-                e = time.time() - t0
-                print(f'    tiles [{idx}/{total}] {idx/total*100:.0f}%  elapsed={e:.0f}s  eta={e/idx*(total-idx):.0f}s', flush=True)
+
+        idx += len(batch_pos)
+        if idx % (bs * 4) <= bs or idx == total:
+            e = time.time() - t0
+            print(f'    tiles [{idx}/{total}] {idx/total*100:.0f}%  elapsed={e:.0f}s  eta={e/idx*(total-idx):.0f}s', flush=True)
+
     return accum / count.clamp_min(1.0)
 
 
@@ -76,6 +88,8 @@ def main():
     parser.add_argument('--tile_h', type=int, default=640)
     parser.add_argument('--tile_w', type=int, default=512)
     parser.add_argument('--tile_overlap', type=int, default=128)
+    parser.add_argument('--batch', type=int, default=8,
+                        help='Tile batch size for parallel inference')
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -108,7 +122,7 @@ def main():
         h_in, w_in = t.shape[2], t.shape[3]
         H = ((h_in+8)//8)*8; W = ((w_in+8)//8)*8
         t = F.pad(t, (0, W-w_in, 0, H-h_in), 'reflect')
-        restored = tiled_forward(model, t, args.tile_h, args.tile_w, args.tile_overlap, device)
+        restored = tiled_forward(model, t, args.tile_h, args.tile_w, args.tile_overlap, device, args.batch)
         restored = restored[:,:,:h_in,:w_in]
         out_img = (restored.squeeze().cpu().numpy()*255).round().clip(0,255).astype(np.uint8)
         # Rotate each 90° CCW, then left-right
