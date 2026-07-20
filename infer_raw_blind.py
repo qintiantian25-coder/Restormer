@@ -107,7 +107,11 @@ def main():
     ckpt = torch.load(args.weights, map_location=device)
     model.load_state_dict(ckpt['params'])
     model.eval()
+    model = torch.compile(model, mode='reduce-overhead')
     print(f'Loaded: {args.weights}')
+    # Warmup
+    with torch.no_grad(), torch.amp.autocast('cuda'):
+        model(torch.randn(1, 1, 640, 512, device=device))
 
     files = sorted(glob(os.path.join(args.raw_dir, '*.raw')))
     if not files: sys.exit(f'No .raw files in {args.raw_dir}')
