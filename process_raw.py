@@ -108,7 +108,7 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size):
         outs = torch.clamp(outs, 0, 1)
         for j, (y0, x0) in enumerate(batch_pos):
             accum[..., y0:y0+th, x0:x0+tw] += outs[j:j+1]
-            count[..., y:y+th, x:x+tw] += 1.0
+            count[..., y0:y0+th, x0:x0+tw] += 1.0
         idx += len(batch_pos)
         if idx % (batch_size*4) <= batch_size or idx == total:
             e = time.time() - t0
