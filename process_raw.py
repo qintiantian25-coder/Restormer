@@ -102,12 +102,12 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size):
     idx = 0; t0 = time.time()
     for i in range(0, len(positions), batch_size):
         batch_pos = positions[i:i+batch_size]
-        patches = torch.cat([x[..., y:y+th, x:x+tw] for y, x in batch_pos], dim=0)
+        patches = torch.cat([x[..., y0:y0+th, x0:x0+tw] for y0, x0 in batch_pos], dim=0)
         with torch.no_grad(), torch.amp.autocast('cuda'):
             outs = model(patches)
         outs = torch.clamp(outs, 0, 1)
-        for j, (y, x) in enumerate(batch_pos):
-            accum[..., y:y+th, x:x+tw] += outs[j:j+1]
+        for j, (y0, x0) in enumerate(batch_pos):
+            accum[..., y0:y0+th, x0:x0+tw] += outs[j:j+1]
             count[..., y:y+th, x:x+tw] += 1.0
         idx += len(batch_pos)
         if idx % (batch_size*4) <= batch_size or idx == total:
