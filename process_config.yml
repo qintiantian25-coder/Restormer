@@ -1,0 +1,26 @@
+# ============================================================
+#  raw → Restormer 处理管线 配置文件
+#  直接修改下方路径，然后执行:  python process_raw.py
+# ============================================================
+
+# 输入 raw 文件目录
+raw_dir: "背景数据_灯管"
+
+# 输出 PNG 保存目录
+output_dir: "results"
+
+# 模型权重路径
+weights: "experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth"
+
+# 处理模式: contrast (默认) 或 nuc
+mode: "contrast"
+
+# 以下仅 nuc 模式需要
+calib: ""
+stripe_degree: 3
+
+# 推理参数
+tile_w: 640
+tile_h: 512
+tile_overlap: 128
+batch: 8

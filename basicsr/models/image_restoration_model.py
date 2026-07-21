@@ -304,11 +304,23 @@ class ImageCleanModel(BaseModel):
             if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
                 if current_psnr > self.best_psnr:
                     self.best_psnr = current_psnr
-                    best_model_path = os.path.join(self.opt['path']['models'], 'best_model.pth')
                     net_g = self.get_bare_model(self.net_g)
-                    torch.save({'params': net_g.state_dict()}, best_model_path)
-                    # 同时保存训练状态，用于续训
-                    self.save_training_state(epoch=-1, current_iter=current_iter, filename='best_model.state')
+
+                    # best_model.pth: 权重
+                    best_path = os.path.join(self.opt['path']['models'], 'best_model.pth')
+                    torch.save({'params': net_g.state_dict()}, best_path)
+
+                    # latest.pth: 权重 + 优化器 + scheduler (完整续训状态)
+                    latest_path = os.path.join(self.opt['path']['models'], 'latest.pth')
+                    state = {
+                        'params': net_g.state_dict(),
+                        'epoch': -1,
+                        'iter': current_iter,
+                        'optimizers': [o.state_dict() for o in self.optimizers],
+                        'schedulers': [s.state_dict() for s in self.schedulers],
+                    }
+                    torch.save(state, latest_path)
+
                     logger = get_root_logger()
                     logger.info(f'New best model saved with PSNR: {self.best_psnr:.4f} at iteration {current_iter}')
         # ======================================

@@ -141,32 +141,15 @@ def main():
     torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
 
-    # automatic resume ..
-    state_folder_path = 'experiments/{}/training_states/'.format(opt['name'])
-    import os
-    try:
-        states = os.listdir(state_folder_path)
-    except:
-        states = []
-
+    # automatic resume: load latest.pth (完整状态) 或 best_model.pth (仅权重)
+    latest_pth = osp.join('experiments', opt['name'], 'models', 'latest.pth')
+    best_pth = osp.join('experiments', opt['name'], 'models', 'best_model.pth')
     resume_state = None
-    if len(states) > 0:
-        # 优先从 best_model.state 续训
-        if 'best_model.state' in states:
-            resume_state = os.path.join(state_folder_path, 'best_model.state')
-        else:
-            max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
-            resume_state = os.path.join(state_folder_path, max_state_file)
-        opt['path']['resume_state'] = resume_state
-
-    # load resume states if necessary
-    if opt['path'].get('resume_state'):
-        device_id = torch.cuda.current_device()
-        resume_state = torch.load(
-            opt['path']['resume_state'],
-            map_location=lambda storage, loc: storage.cuda(device_id))
-    else:
-        resume_state = None
+    if osp.exists(latest_pth):
+        resume_state = torch.load(latest_pth, map_location='cpu')
+        logger.info(f'Resume from latest.pth (iter {resume_state["iter"]})')
+    elif osp.exists(best_pth):
+        opt['path']['pretrain_network_g'] = best_pth
 
     # mkdir for experiments and logger
     if resume_state is None:
@@ -183,13 +166,16 @@ def main():
     train_loader, train_sampler, val_loader, total_epochs, total_iters = result
 
     # create model
-    if resume_state:  # resume training
-        check_resume(opt, resume_state['iter'])
+    if resume_state:  # 从 latest.pth 续训
+        opt['path']['pretrain_network_g'] = None  # 手动加载, 不走 check_resume
         model = create_model(opt)
-        model.resume_training(resume_state)  # handle optimizers and schedulers
-        logger.info(f"Resuming training from epoch: {resume_state['epoch']}, "
-                    f"iter: {resume_state['iter']}.")
-        start_epoch = resume_state['epoch']
+        model.net_g.load_state_dict(resume_state['params'])
+        for i, o in enumerate(resume_state['optimizers']):
+            model.optimizers[i].load_state_dict(o)
+        for i, s in enumerate(resume_state['schedulers']):
+            model.schedulers[i].load_state_dict(s)
+        logger.info(f"Resuming training from iter: {resume_state['iter']}.")
+        start_epoch = resume_state.get('epoch', -1)
         current_iter = resume_state['iter']
     else:
         model = create_model(opt)
@@ -207,6 +193,8 @@ def main():
     else:
         train_log = open(train_log_path, 'a')
     train_log_freq = opt['logger']['print_freq']
+
+    # latest.pth 在 nondist_validation 中 PSNR 提升时自动保存
 
     # dataloader prefetcher
     prefetch_mode = opt['datasets']['train'].get('prefetch_mode')
@@ -315,8 +303,7 @@ def main():
 
             # save models and training states
             if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
-                logger.info('Saving models and training states.')
-                model.save(epoch, current_iter)
+                pass  # latest.pth 仅在 PSNR 提升时保存
 
             # validation
             if opt.get('val') is not None and (current_iter %
@@ -338,8 +325,6 @@ def main():
     consumed_time = str(
         datetime.timedelta(seconds=int(time.time() - start_time)))
     logger.info(f'End of training. Time consumed: {consumed_time}')
-    logger.info('Save the latest model.')
-    model.save(epoch=-1, current_iter=-1)  # -1 stands for the latest
     if opt.get('val') is not None:
         model.validation(val_loader, current_iter, tb_logger,
                          opt['val']['save_img'])

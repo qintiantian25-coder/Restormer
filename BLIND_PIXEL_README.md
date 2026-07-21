@@ -1,235 +1,118 @@
-# Restormer 盲元修复 — 训练 & 推理指南
-
-## 数据
-
-```
-ceshi_full.png              # 6000×6000 (NUC+条纹抑制后，含盲元)
-data5/
-├── train_blur/   001..010/ frame_0001~0054.png   (10序列, 48-54帧)
-├── train_sharp/  001..010/ (一一对应, 无噪声 GT)
-├── test_blur/    001..004/ frame_0001~0052.png   (4序列, 51-52帧)
-├── test_sharp/   001..004/
-├── val_blur/     001..002/ frame_0001~0052.png   (2序列, 50-52帧)
-└── val_sharp/    001..002/
-```
-
-| 属性 | 值 |
-|------|-----|
-| Patch 尺寸 | 640×512 (W×H) |
-| 通道 | 1 (灰度) |
-| 划分 | train 6 / test 4 / val 2 |
-| blur 来源 | ceshi_full.png 上直接裁剪（盲元可见） |
-| sharp 来源 | GT.png 同一位置裁剪（无噪声真值） |
-
-## 训练
-
-### 重新训练（clean GT，从头开始）
-
-```bash
-# 1. 删除旧实验目录（干净 GT 不需要旧权重）
-rm -rf experiments/RealDenosing_BlindPixel_Gray_NoMask
-
-# 2. 开始训练
-./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
-```
-
-### 续训
-
-中断后直接重新运行，自动从 `best_model.state` 恢复：
-
-```bash
-./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
-```
-
-### 增加训练数据
-
-新增序列直接放入对应子目录，无需改代码或配置——数据集每次启动自动递归扫描：
-
-```bash
-# 1. 放入新数据 (007/008)
-cp -r /path/to/new/007 data5/train_blur/007
-cp -r /path/to/new/007 data5/train_sharp/007
-cp -r /path/to/new/008 data5/train_blur/008
-cp -r /path/to/new/008 data5/train_sharp/008
-
-# 2. 验证配对
-for s in 007 008; do
-  echo "train $s: blur=$(ls data5/train_blur/$s/*.png 2>/dev/null | wc -l)  sharp=$(ls data5/train_sharp/$s/*.png 2>/dev/null | wc -l)"
-done
-
-# 3. 续训 (total_iter 已从 150k → 200k，自动扫描新数据)
-./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml
-```
-
-```
-640×512 patch
-    ↓ random crop 384×384
-    ↓ geometric augment (翻转/旋转, 8 种)
-    ↓ Restormer (dim=48, grayscale)
-    ↓ L1 loss (无盲元加权)
-```
-
-| 参数 | 设定 |
-|------|------|
-| 模型 | Restormer, inp/out_channels=1 |
-| gt_size | 384 |
-| Batch size | 4 / GPU |
-| 优化器 | AdamW, lr=3e-4, weight_decay=1e-3 |
-| 学习率 | CosineAnnealingRestartCyclicLR, 五周期各 50k |
-| 总迭代 | 250000 |
-| 精度 | fp16 (autocast + GradScaler) |
-| 增强 | geometric_augs |
-| 保存 | 仅 best_model.pth，PSNR 提升时更新 |
-
-训练进度（最终）：
-
-| iter | PSNR | SSIM |
-|------|------|------|
-| 12k | 47.42 | 0.9975 |
-| 48k | 51.53 | 0.9987 |
-| 100k | 52.88 | 0.9989 |
-| 152k | 47.51 | — | ← 新增 007/008, lr 重启 |
-| 176k | 50.45 | 0.9973 |
-| 200k | 51.47 | 0.9977 | ← 新增 009/010, lr 重启 |
-| 224k | 46.55 | 0.9972 |
-| **248k** | **47.59** | **0.9977** |
-
-### 第二阶段：加权 loss（如果盲元残影明显）
-
-首先生成盲元 mask（基于局部中值检测，不依赖 GT 质量）：
-
-```bash
-# 从 blur 图像自身检测盲元
-python generate_masks.py --root data5 --split train --threshold 30
-python generate_masks.py --root data5 --split val --threshold 30
-```
-
-然后 warm-start 训练：
-
-```bash
-./train.sh Denoising/Options/RealDenosing_BlindPixel_Gray_Masked.yml
-```
-
-mask 位置 loss 权重 10×，从 NoMask best_model 续训。阈值可用 `--visualize` 检查调整。
-
-### 监控
-
-```bash
-tensorboard --logdir experiments/RealDenosing_BlindPixel_Gray_NoMask/tb_logger
-cat experiments/RealDenosing_BlindPixel_Gray_NoMask/train_log.txt
-cat experiments/RealDenosing_BlindPixel_Gray_NoMask/val_log.txt
-```
+# Restormer 红外盲元修复
 
 ## 推理
 
-### Raw 文件一键处理（推荐）
-
-直接处理原始 .raw 文件，含完整预处理管线：
+1. 修改 `process_config.yml` 中的路径
+2. 执行:
 
 ```bash
-# Windows 原生 CMD/PowerShell
-python pipeline_raw_to_restored.py \
-    --raw_dir "E:\\DD数据\\YD背景100帧" \
-    --calib "E:\\DD数据\\非均匀校正系数\\YD_SW_A_D_72000_4hz_xs.mat" \
-    --output_dir "E:\\DD数据\\results" \
-    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
-
-# WSL
-python pipeline_raw_to_restored.py \
-    --raw_dir "/mnt/e/DD数据/YD背景100帧" \
-    --calib "/mnt/e/DD数据/非均匀校正系数/YD_SW_A_D_72000_4hz_xs.mat" \
-    --output_dir "/mnt/e/DD数据/results" \
-    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
+python process_raw.py
 ```
 
-管线：`raw(u16) → NUC → 条纹抑制 → 对比度增强(gamma 0.6) → Restormer分块推理 → PNG`
+### 配置文件 `process_config.yml`
 
-| 参数 | 说明 |
+```yaml
+raw_dir: "背景数据_灯管"           # 输入 raw 目录
+output_dir: "results"              # 输出 PNG 目录
+weights: "experiments/.../best_model.pth"
+mode: "contrast"                   # contrast 或 nuc (NUC+条纹抑制)
+# calib: "xxx.mat"                 # nuc 模式必填
+tile_w: 640  #2048
+tile_h: 512  #2048
+tile_overlap: 128
+batch: 8      #16                  # 并行 batch (显存大可调大)
+```
+
+### 评估
+
+```bash
+python evaluate_nr.py --output <修复图> --input <原图> --save <结果> --thresholds 5 10 20 30 50
+```
+
+| 指标 | 方向 | 含义 |
+|------|------|------|
+| residual_X (%) | ↓ | 像素与 5×5 邻域中值偏差 > X 的占比 |
+| localstd | ↓ | 局部标准差均值 |
+| roughness | ↓ | 归一化 Laplacian 高通能量 |
+| estsnr | ↑ | Immerkaer 估计信噪比 |
+
+## 训练
+
+### 数据准备
+
+```
+data_new/
+├── train_blur/   001/ frame_0001.png ...   (含盲元)
+├── train_sharp/  001/ (一一对应, GT)
+├── val_blur/     001/ ...
+└── val_sharp/    001/ ...
+```
+
+- 640×512 灰度 PNG，文件名一一对应，子目录自动递归扫描
+
+### 修改配置
+
+编辑 `Denoising/Options/RealDenosing_BlindPixel_Merged.yml`：
+
+```yaml
+datasets:
+  train:
+    dataroot_gt: data_new/train_sharp     # ← 改这里
+    dataroot_lq: data_new/train_blur      # ← 改这里
+    iters: [180000]                       # ← 总迭代数
+  val:
+    dataroot_gt: data_new/val_sharp       # ← 改这里
+    dataroot_lq: data_new/val_blur        # ← 改这里
+
+train:
+  total_iter: 180000                      # ← 和 iters 一致
+  scheduler:
+    periods: [60000, 60000, 60000]        # ← 和=total_iter, 每段长度
+    restart_weights: [1, 1, 1]            # ← 和 periods 等长
+    eta_mins: [0.000001, 0.000001, 0.000001]
+```
+
+### 训练
+
+```bash
+# 从头训练
+rm -rf experiments/RealDenosing_BlindPixel_Merged
+./train.sh Denoising/Options/RealDenosing_BlindPixel_Merged.yml
+```
+
+### 续训 / 加轮数
+
+中断后直接重新运行，自动从 `latest.pth` 完整恢复（模型+优化器+scheduler）：
+
+```bash
+./train.sh Denoising/Options/RealDenosing_BlindPixel_Merged.yml
+```
+
+想加 200 轮：把 `iters` 和 `total_iter` 改大，`periods`/`restart_weights`/`eta_mins` 补上对应段数，然后 `./train.sh`。
+
+### 保存文件
+
+仅两个文件，PSNR 提升时同步更新：
+
+| 文件 | 内容 |
 |------|------|
-| `--raw_dir` | .raw 文件目录 |
-| `--calib` | NUC 标定 .mat 文件 (kk/bb) |
-| `--output_dir` | 结果保存目录 |
-| `--weights` | 训练好的模型权重 |
-| `--tile_h / --tile_w` | 推理分块尺寸，默认 640×512 |
-| `--stripe_degree` | 条纹抑制多项式阶数，默认 3 |
-| `--stripe_mode` | poly / median / both |
-| `--max_frames` | 最大处理帧数，0=全部 |
+| `best_model.pth` | 最佳模型权重 |
+| `latest.pth` | 权重 + 优化器 + scheduler + iter (完整续训状态) |
 
-### Raw 文件纯盲元处理 (无 NUC/条纹)
-
-仅对比度增强 + Restormer，不做 NUC 和条纹抑制。输出旋转 90° 的左右对比图：
-
-```bash
-python infer_raw_blind.py \
-    --raw_dir "背景数据_灯管" \
-    --output_dir "背景数据_灯管/results" \
-    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
-```
-
-### 单张 PNG 全图
-
-默认 640×512 分块 (与训练一致)，fp16，均匀加权融合：
-
-```bash
-python infer_blind_pixel.py \
-    --input ceshi_full.png \
-    --output restored.png \
-    --weights experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
-
-# 方形大块
-python infer_blind_pixel.py --input ceshi_full.png --output restored.png \
-    --weights .../best_model.pth --tile 2048 --tile_overlap 128
-```
-
-| 参数 | 说明 |
-|------|------|
-| `--input` | 原始含盲元图像 |
-| `--output` | 修复后保存路径 |
-| `--weights` | best_model.pth 路径 |
-| `--tile_w / --tile_h` | 分块尺寸 (8 的倍数)，默认 640×512 |
-| `--tile` | 方形分块快捷方式 |
-| `--tile_overlap` | 块间重叠，默认 128 |
-| `--fp32` | 强制 fp32 (默认 fp16) |
-
-### 测试集批量评估
-
-```bash
-# model 修复版
-python eval_test.py
-
-# 保存修复图片
-python eval_test.py --save results/test_restored
-
-# baseline: blur 原始 vs sharp
-python eval_test.py --no_model
-```
-
-输出每个序列和总体的 PSNR/SSIM。
-
-## 盲元分析
-
-`generate_masks.py` 基于局部中值滤波，不依赖 GT。`--threshold` 越小越敏感：
-
-```bash
-python generate_masks.py --root data5 --split train --threshold 30
-python generate_masks.py --root data5 --split train --threshold 30 --visualize
-```
-
-## 文件说明
+## 文件
 
 | 文件 | 用途 |
 |------|------|
-| `basicsr/data/paired_image_dataset.py` | `Dataset_PairedImage_BlindPixel`，子目录扫描 + CSV/PNG mask |
-| `basicsr/models/image_restoration_model.py` | fp16 AMP + best_model 保存 + 加权 loss + val_log |
-| `basicsr/models/base_model.py` | `save_training_state` 自定义文件名 |
-| `basicsr/train.py` | train_log + best_model.state 优先续训 |
-| `Denoising/Options/RealDenosing_BlindPixel_Gray_NoMask.yml` | 无 mask 训练 |
-| `Denoising/Options/RealDenosing_BlindPixel_Gray_Masked.yml` | 加权 loss 训练 (warm-start) |
-| `infer_blind_pixel.py` | 全图分块推理 |
-| `eval_test.py` | 测试集批量评估 (PSNR/SSIM) |
-| `generate_masks.py` | 盲元 mask 自动检测 |
-| `pipeline_raw_to_restored.py` | Raw 文件一键处理 (NUC+条纹抑制+Restormer) |
-| `infer_raw_blind.py` | Raw 文件纯盲元处理 (无 NUC/条纹) |
-| `train.sh` | 单卡非分布式启动 |
+| `process_raw.py` | raw → 修复 PNG |
+| `process_config.yml` | 推理参数 |
+| `evaluate_nr.py` | 无参考质量评估 |
+| `train.sh` | 训练启动 |
+| `Denoising/Options/RealDenosing_BlindPixel_Merged.yml` | 训练配置 |
+| `basicsr/` | 模型引擎 |
+| `experiments/` | 模型产出 |
 
-> **依赖**：`pipeline_raw_to_restored.py` 需要 `scipy` 和 `h5py`（MATLAB v7.3 .mat 文件）。WSL 下需重新挂载 USB 盘：`sudo umount /mnt/e; sudo mount -t drvfs E: /mnt/e`
+## 依赖
+
+```bash
+pip install torch opencv-python numpy scipy h5py pyyaml -i https://pypi.tuna.tsinghua.edu.cn/simple
+```

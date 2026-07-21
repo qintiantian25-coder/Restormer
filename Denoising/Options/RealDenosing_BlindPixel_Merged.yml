@@ -1,18 +1,23 @@
-# general settings
+# ============================================================
+#  Restormer 红外盲元修复 — 合并训练配置
+# ============================================================
+
 name: RealDenosing_BlindPixel_Merged
 model_type: ImageCleanModel
 scale: 1
-num_gpu: 1
+num_gpu: 1           # GPU 数量
 manual_seed: 100
 
-# dataset and data loader settings
+# ============================================================
+#  数据集 — 修改这里指向新数据
+# ============================================================
 datasets:
   train:
     name: TrainSet
     type: Dataset_PairedImage_BlindPixel
-    dataroot_gt: data_merged/train_sharp
-    dataroot_lq: data_merged/train_blur
-    in_ch: 1
+    dataroot_gt: data_merged/train_sharp     # ← 干净 GT 路径
+    dataroot_lq: data_merged/train_blur      # ← 含盲元图像路径
+    in_ch: 1                                 # 1=灰度, 3=RGB
     blind_weight: 0.0
     geometric_augs: true
     filename_tmpl: '{}'
@@ -21,28 +26,30 @@ datasets:
 
     use_shuffle: true
     num_worker_per_gpu: 8
-    batch_size_per_gpu: 4
+    batch_size_per_gpu: 4       # 单卡 batch size
     pin_memory: true
     prefetch_mode: cuda
 
     mini_batch_sizes: [4]
-    iters: [180000]
-    gt_size: 384
+    iters: [180000]             # ← 总迭代次数 (续训时改大)
+    gt_size: 384                # 训练 patch 大小
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
 
   val:
     name: ValSet
     type: Dataset_PairedImage_BlindPixel
-    dataroot_gt: data_merged/val_sharp
-    dataroot_lq: data_merged/val_blur
+    dataroot_gt: data_merged/val_sharp       # ← 验证 GT 路径
+    dataroot_lq: data_merged/val_blur        # ← 验证 blur 路径
     in_ch: 1
     blind_weight: 0.0
     filename_tmpl: '{}'
     io_backend:
       type: disk
 
-# network structures
+# ============================================================
+#  网络结构 — 一般不改
+# ============================================================
 network_g:
   type: Restormer
   inp_channels: 1
@@ -56,26 +63,29 @@ network_g:
   LayerNorm_type: BiasFree
   dual_pixel_task: False
 
-# path
+# ============================================================
+#  路径 — pretrain 可设旧权重做 warm-start
+# ============================================================
 path:
-  # warm-start from data5 model (best blind-pixel performance)
-  pretrain_network_g: experiments/RealDenosing_BlindPixel_Gray_NoMask/models/best_model.pth
+  pretrain_network_g: ~        # warm-start 时设为旧模型路径
   strict_load_g: true
-  resume_state: ~
+  resume_state: ~              # 自动检测 latest.pth, 无需手动设
 
-# training settings
+# ============================================================
+#  训练参数
+# ============================================================
 train:
-  total_iter: 180000
+  total_iter: 180000           # ← 总迭代次数 (续训时改大)
   warmup_iter: -1
   use_grad_clip: true
-  use_fp16: true
+  use_fp16: true               # 混合精度
   blind_weight: 0.0
 
-  scheduler:
+  scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
-    periods: [60000, 60000, 60000]
-    restart_weights: [1, 1, 1]
-    eta_mins: [0.000001, 0.000001, 0.000001]
+    periods: [60000, 60000, 60000]          # ← 每段长度 (和=total_iter)
+    restart_weights: [1, 1, 1]              # ← 和 periods 等长
+    eta_mins: [0.000001, 0.000001, 0.000001] # ← 和 periods 等长
 
   mixing_augs:
     mixup: false
@@ -91,10 +101,12 @@ train:
     loss_weight: 1
     reduction: mean
 
-# validation settings
+# ============================================================
+#  验证
+# ============================================================
 val:
   window_size: 8
-  val_freq: 4000
+  val_freq: 4000               # 每 N iter 验证一次
   save_img: false
   rgb2bgr: false
   use_image: false
@@ -110,10 +122,12 @@ val:
       crop_border: 0
       test_y_channel: false
 
-# logging settings
+# ============================================================
+#  日志
+# ============================================================
 logger:
-  print_freq: 200
-  save_checkpoint_freq: 250000
+  print_freq: 200              # 每 N iter 打印一次
+  save_checkpoint_freq: 999999 # 不需要中间保存 (仅 latest.pth)
   use_tb_logger: true
   wandb:
     project: ~
