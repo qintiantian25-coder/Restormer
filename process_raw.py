@@ -112,8 +112,10 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size):
         idx += len(batch_pos)
         if idx % (batch_size*4) <= batch_size or idx == total:
             e = time.time() - t0
+            mem = torch.cuda.max_memory_allocated(device) / 1024**3
             print(f'    tiles [{idx}/{total}] {idx/total*100:.0f}%  '
-                  f'elapsed={e:.0f}s  eta={e/idx*(total-idx):.0f}s', flush=True)
+                  f'elapsed={e:.0f}s  eta={e/idx*(total-idx):.0f}s  '
+                  f'GPU_mem={mem:.1f}G', flush=True)
     return accum / count.clamp_min(1.0)
 
 
