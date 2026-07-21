@@ -20,7 +20,7 @@ calib: ""
 stripe_degree: 3
 
 # 推理参数
-tile_w: 640
-tile_h: 512
+tile_w: 2048
+tile_h: 2048
 tile_overlap: 128
-batch: 8
+batch: 16
