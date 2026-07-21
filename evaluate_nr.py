@@ -1,82 +1,81 @@
 """
-无参考图像质量评估 (输出 vs 输入).
+盲元修复质量评估 (输出 vs 输入).
 
-指标 (均为无参考, 越小越好):
-  NIQE  — Naturalness Image Quality Evaluator, NSS 特征 + MVG 距离
-  DBCNN — Deep Blind CNN, 合成+真实失真联合训练
+指标:
+  Residual_X  — 像素与自身邻域中值的偏差 > X 的占比, 越小越好
+  LocalStd    — 局部标准差均值 (5×5), 越小越好
+  Roughness   — 归一化 Laplacian 高通能量, 越小越好
+  NU          — 非均匀性 (局部均值变异系数), 越小越好
+  EstSNR      — 估计信噪比 (Immerkaer), 越大越好
 
-依赖: pip install pyiqa
+不依赖 RGB 预训练模型, 纯数学计算, 天然适配灰度红外图像.
 
 用法:
   python evaluate_nr.py
+  python evaluate_nr.py --output <修复图> --input <原图> --save <结果> --thresholds 5 10 20 30 50
 """
 
-import os
-import re
-import csv
-import cv2
-import numpy as np
-import torch
-import pyiqa
+import os, re, csv, argparse
+import cv2, numpy as np
+
+
+DEFAULTS = {
+    'output': r"/root/Qtt/FGAF-Net/results/FGAF-Net_BlindPixel_stage2_real/test",
+    'input':  r"/root/Qtt/FGAF-Net/real_image/test_blur",
+    'save':   r"/root/Qtt/FGAF-Net/results/FGAF-Net_BlindPixel_stage2_real/nr_eval",
+}
+DEFAULT_THRESHOLDS = [5, 10, 20, 30, 50]
 
 
 # =====================================================================
-# 配置
+# 指标
 # =====================================================================
 
-OUTPUT_DIR = r"/root/Qtt/FGAF-Net/results/FGAF-Net_BlindPixel_stage2_real/test"
-GT_DIR     = r"/root/Qtt/FGAF-Net/real_image/test_sharp"
-INPUT_DIR  = r"/root/Qtt/FGAF-Net/real_image/test_blur"
-SAVE_DIR   = r"/root/Qtt/FGAF-Net/results/FGAF-Net_BlindPixel_stage2_real/nr_eval"
-
-NR_METRICS = ['niqe', 'dbcnn']
-
-
-# =====================================================================
-# MRD 实现 (参考 mrd.m)
-# =====================================================================
-
-def compute_mrd(img_clear: np.ndarray, img_restored: np.ndarray) -> float:
-    """
-    Mean Relative Deviation.
-    |GT - restored| / max(restored, 1) 逐像素均值, 越小越好.
-    等价于 mrd.m: abs(clear - noise) / noise, noise==0 时设为 1.
-    """
-    clear = img_clear.astype(np.float64)
-    restored = img_restored.astype(np.float64)
-    denom = np.maximum(restored, 1.0)
-    return float(np.mean(np.abs(clear - restored) / denom))
+def compute_residual(img, thresh, kernel_size=5):
+    """像素与自身邻域中值的偏差 > thresh 的占比 (%), 越小越好."""
+    f = img.astype(np.float64)
+    med = cv2.medianBlur(img, kernel_size).astype(np.float64)
+    return float(100.0 * (np.abs(f - med) > thresh).sum() / img.size)
 
 
-# =====================================================================
-# IQA 计算
-# =====================================================================
-
-def _to_tensor(img: np.ndarray) -> torch.Tensor:
-    t = torch.from_numpy(img.astype(np.float32) / 255.0)
-    if t.dim() == 2:
-        t = t.unsqueeze(0).unsqueeze(0)
-    return t
+def compute_local_std(img, kernel_size=5):
+    """局部标准差均值, 越小越好."""
+    f = img.astype(np.float64)
+    m = cv2.blur(f, (kernel_size, kernel_size))
+    ms = cv2.blur(f**2, (kernel_size, kernel_size))
+    return float(np.mean(np.sqrt(np.maximum(ms - m**2, 0))))
 
 
-class IQAComputer:
-    def __init__(self):
-        self._metrics = {}
+def compute_roughness(img):
+    """归一化 Laplacian 高通能量, 越小越好."""
+    f = img.astype(np.float64)
+    lap = np.array([[0,1,0],[1,-4,1],[0,1,0]], dtype=np.float64)
+    hf = np.abs(cv2.filter2D(f, -1, lap))
+    return float(np.mean(hf) / (np.mean(f) + 1e-10))
 
-    def _get_metric(self, name):
-        if name not in self._metrics:
-            self._metrics[name] = pyiqa.create_metric(
-                name,
-                device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
-            )
-        return self._metrics[name]
 
-    def compute(self, metric_name: str, img: np.ndarray) -> float:
-        t = _to_tensor(img)
-        if t.shape[1] == 1:
-            t = t.repeat(1, 3, 1, 1)  # 灰度 → RGB
-        with torch.no_grad():
-            return float(self._get_metric(metric_name)(t).item())
+def compute_nu(img, block_size=32):
+    """非均匀性 (局部均值变异系数), 越小越好."""
+    f = img.astype(np.float64)
+    h, w = f.shape
+    means = []
+    for y in range(0, h, block_size):
+        for x in range(0, w, block_size):
+            block = f[y:min(y+block_size, h), x:min(x+block_size, w)]
+            if block.size > block_size:
+                means.append(np.mean(block))
+    means = np.array(means)
+    return float(100.0 * np.std(means) / (np.mean(means) + 1e-10))
+
+
+def compute_est_snr(img):
+    """Immerkaer 拉普拉斯噪声估计 SNR, 越大越好."""
+    f = img.astype(np.float64)
+    lap = np.array([[1,-2,1],[-2,4,-2],[1,-2,1]], dtype=np.float64)
+    laplacian = cv2.filter2D(f, -1, lap)
+    noise_var = np.var(laplacian) / 72.0
+    signal_var = max(np.var(f) - noise_var, 1e-10)
+    return float(10.0 * np.log10(signal_var / noise_var))
 
 
 # =====================================================================
@@ -89,11 +88,9 @@ def natural_sort_key(s):
 
 def _resolve_path(base_dir, seq_name, rel_path, img_name):
     p = os.path.join(base_dir, rel_path)
-    if os.path.exists(p):
-        return p
+    if os.path.exists(p): return p
     p = os.path.join(base_dir, seq_name, img_name)
-    if os.path.exists(p):
-        return p
+    if os.path.exists(p): return p
     return None
 
 
@@ -102,15 +99,23 @@ def _resolve_path(base_dir, seq_name, rel_path, img_name):
 # =====================================================================
 
 def main():
+    parser = argparse.ArgumentParser()
+    for k, v in DEFAULTS.items():
+        parser.add_argument(f'--{k}', default=v)
+    parser.add_argument('--thresholds', nargs='+', type=int, default=DEFAULT_THRESHOLDS)
+    args = parser.parse_args()
+
+    thresholds = args.thresholds
+    OUTPUT_DIR = args.output
+    INPUT_DIR  = args.input
+    SAVE_DIR   = args.save
     os.makedirs(SAVE_DIR, exist_ok=True)
-    iqa = IQAComputer()
 
     # 扫描输出目录
     out_records = []
     for root, _, files in os.walk(OUTPUT_DIR):
         for f in files:
-            if not f.endswith('.png'):
-                continue
+            if not f.endswith('.png'): continue
             op = os.path.join(root, f)
             rel = os.path.relpath(op, OUTPUT_DIR).replace('\\', '/')
             out_records.append({
@@ -124,138 +129,108 @@ def main():
     for r in out_records:
         seq_records.setdefault(r['seq'], []).append(r)
 
-    keys = ['image', 'seq', 'mrd_out', 'mrd_in']
-    for m in NR_METRICS:
+    METRICS = ([f'residual_{t}' for t in thresholds] +
+               ['localstd', 'roughness', 'nu', 'estsnr'])
+    DIRECTION = {f'residual_{t}': '↓' for t in thresholds}
+    for m in ['localstd', 'roughness', 'nu']:
+        DIRECTION[m] = '↓'
+    DIRECTION['estsnr'] = '↑'
+
+    keys = ['image', 'seq']
+    for m in METRICS:
         keys += [f'{m}_out', f'{m}_in']
 
-    per_image_rows = []
-    seq_stats = {}
-    global_vals = {'mrd_out': [], 'mrd_in': []}
-    for m in NR_METRICS:
-        global_vals[f'{m}_out'] = []
+    per_image_rows, seq_stats = [], {}
+    global_vals = {f'{m}_out': [] for m in METRICS}
+    for m in METRICS:
         global_vals[f'{m}_in'] = []
 
     print("===> 开始评估...")
 
     for seq_name in sorted(seq_records, key=natural_sort_key):
         seq_recs = sorted(seq_records[seq_name], key=lambda r: natural_sort_key(r['rel_path']))
-        sm = {'mrd_out': [], 'mrd_in': []}
-        for m in NR_METRICS:
-            sm[f'{m}_out'] = []
+        sm = {f'{m}_out': [] for m in METRICS}
+        for m in METRICS:
             sm[f'{m}_in'] = []
 
         for idx, rec in enumerate(seq_recs):
-            out_path = rec['out_path']
-            rel_path = rec['rel_path']
+            out_img = cv2.imread(rec['out_path'], cv2.IMREAD_GRAYSCALE)
+            if out_img is None: continue
+            in_path = _resolve_path(INPUT_DIR, rec['seq'], rec['rel_path'], rec['img_name'])
 
-            in_path = _resolve_path(INPUT_DIR, seq_name, rel_path, rec['img_name'])
+            out_vals = {}
+            for t in thresholds:
+                out_vals[f'residual_{t}'] = compute_residual(out_img, t)
+            out_vals['localstd'] = compute_local_std(out_img)
+            out_vals['roughness'] = compute_roughness(out_img)
+            out_vals['nu'] = compute_nu(out_img)
+            out_vals['estsnr'] = compute_est_snr(out_img)
 
-            out_img = cv2.imread(out_path, cv2.IMREAD_GRAYSCALE)
-            if out_img is None:
-                print(f"  警告: 无法读取 {out_path}, 跳过")
-                continue
-
-            gt_path = _resolve_path(GT_DIR, seq_name, rel_path, rec['img_name'])
-
-            # MRD
-            mrd_out, mrd_in = None, None
-            if gt_path and os.path.exists(gt_path):
-                gt_img = cv2.imread(gt_path, cv2.IMREAD_GRAYSCALE)
-                if gt_img is not None:
-                    gh, gw = gt_img.shape[:2]
-                    out_r = cv2.resize(out_img, (gw, gh)) if (h, w) != (gh, gw) else out_img
-                    mrd_out = compute_mrd(gt_img, out_r)
-
-            # 无参考指标
-            nr_out = {m: iqa.compute(m, out_img) for m in NR_METRICS}
-
-            nr_in = {}
+            in_vals = {}
             if in_path and os.path.exists(in_path):
                 in_img = cv2.imread(in_path, cv2.IMREAD_GRAYSCALE)
                 if in_img is not None:
-                    if mrd_out is not None and gt_path and os.path.exists(gt_path):
-                        gt_img2 = cv2.imread(gt_path, cv2.IMREAD_GRAYSCALE)
-                        if gt_img2 is not None:
-                            gh, gw = gt_img2.shape[:2]
-                            in_r = cv2.resize(in_img, (gw, gh)) if in_img.shape != (gh, gw) else in_img
-                            mrd_in = compute_mrd(gt_img2, in_r)
-                    nr_in = {m: iqa.compute(m, in_img) for m in NR_METRICS}
+                    for t in thresholds:
+                        in_vals[f'residual_{t}'] = compute_residual(in_img, t)
+                    in_vals['localstd'] = compute_local_std(in_img)
+                    in_vals['roughness'] = compute_roughness(in_img)
+                    in_vals['nu'] = compute_nu(in_img)
+                    in_vals['estsnr'] = compute_est_snr(in_img)
 
-            row = {'image': rel_path, 'seq': seq_name,
-                   'mrd_out': round(mrd_out, 6) if mrd_out is not None else None,
-                   'mrd_in': round(mrd_in, 6) if mrd_in is not None else None}
-            for m in NR_METRICS:
-                row[f'{m}_out'] = round(nr_out[m], 6)
-                row[f'{m}_in'] = round(nr_in[m], 6) if m in nr_in else None
+            row = {'image': rec['rel_path'], 'seq': rec['seq']}
+            for m in METRICS:
+                row[f'{m}_out'] = round(out_vals.get(m), 6) if out_vals.get(m) is not None else None
+                row[f'{m}_in'] = round(in_vals.get(m), 6) if in_vals.get(m) is not None else None
             per_image_rows.append(row)
 
-            def _append(lst, v):
-                if v is not None:
-                    lst.append(v)
-            _append(sm['mrd_out'], mrd_out)
-            _append(sm['mrd_in'], mrd_in)
-            _append(global_vals['mrd_out'], mrd_out)
-            _append(global_vals['mrd_in'], mrd_in)
-            for m in NR_METRICS:
-                sm[f'{m}_out'].append(nr_out[m])
-                global_vals[f'{m}_out'].append(nr_out[m])
-                if m in nr_in:
-                    sm[f'{m}_in'].append(nr_in[m])
-                    global_vals[f'{m}_in'].append(nr_in[m])
+            for m in METRICS:
+                for v, lst in [(out_vals, f'{m}_out'), (in_vals, f'{m}_in')]:
+                    if v.get(m) is not None:
+                        sm[lst].append(v[m])
+                        global_vals[lst].append(v[m])
 
-            if (idx + 1) % 10 == 0 or idx == len(seq_recs) - 1:
-                parts = f"MRD={mrd_out}(out) vs {mrd_in}(in)  "
-                parts += "  ".join(f"{m.upper()}={nr_out[m]:.3f}(out) vs {nr_in.get(m)}(in)" for m in NR_METRICS)
-                print(f"  [{seq_name}] {idx + 1}/{len(seq_recs)}  {parts}")
+            if (idx+1) % 10 == 0 or idx == len(seq_recs)-1:
+                print(f"  [{rec['seq']}] {idx+1}/{len(seq_recs)}  "
+                      f"Res10={out_vals.get('residual_10'):.1f}% vs {in_vals.get('residual_10')}%  "
+                      f"Std={out_vals.get('localstd'):.1f}  SNR={out_vals.get('estsnr'):.1f}")
 
-        if sm['niqe_out']:
-            st = {'count': len(sm['niqe_out']),
-                  'mrd_out': float(np.mean(sm['mrd_out'])) if sm['mrd_out'] else None,
-                  'mrd_in': float(np.mean(sm['mrd_in'])) if sm['mrd_in'] else None}
-            for m in NR_METRICS:
-                st[f'{m}_out'] = float(np.mean(sm[f'{m}_out']))
+        if sm['localstd_out']:
+            st = {'count': len(sm['localstd_out'])}
+            for m in METRICS:
+                st[f'{m}_out'] = float(np.mean(sm[f'{m}_out'])) if sm[f'{m}_out'] else None
                 st[f'{m}_in'] = float(np.mean(sm[f'{m}_in'])) if sm[f'{m}_in'] else None
             seq_stats[seq_name] = st
 
-    # ---- CSV ----
+    # CSV
     csv_path = os.path.join(SAVE_DIR, 'nr_metrics.csv')
     with open(csv_path, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=keys)
-        writer.writeheader()
-        for row in per_image_rows:
-            writer.writerow(row)
-
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        for row in per_image_rows: w.writerow(row)
         for sn in sorted(seq_stats, key=natural_sort_key):
             st = seq_stats[sn]
-            r = {'image': f'AVERAGE ({sn})', 'seq': sn,
-                 'mrd_out': round(st['mrd_out'], 6) if st['mrd_out'] is not None else None,
-                 'mrd_in': round(st['mrd_in'], 6) if st['mrd_in'] is not None else None}
-            for m in NR_METRICS:
-                r[f'{m}_out'] = round(st[f'{m}_out'], 6)
+            r = {'image': f'AVERAGE ({sn})', 'seq': sn}
+            for m in METRICS:
+                r[f'{m}_out'] = round(st[f'{m}_out'], 6) if st[f'{m}_out'] is not None else None
                 r[f'{m}_in'] = round(st[f'{m}_in'], 6) if st[f'{m}_in'] is not None else None
-            writer.writerow(r)
-
+            w.writerow(r)
         def _a(lst): return float(np.mean(lst)) if lst else None
-
-        r = {'image': 'AVERAGE', 'seq': '',
-             'mrd_out': round(_a(global_vals['mrd_out']), 6) if global_vals['mrd_out'] else None,
-             'mrd_in': round(_a(global_vals['mrd_in']), 6) if global_vals['mrd_in'] else None}
-        for m in NR_METRICS:
-            r[f'{m}_out'] = round(_a(global_vals[f'{m}_out']), 6)
+        r = {'image': 'AVERAGE', 'seq': ''}
+        for m in METRICS:
+            r[f'{m}_out'] = round(_a(global_vals[f'{m}_out']), 6) if global_vals[f'{m}_out'] else None
             r[f'{m}_in'] = round(_a(global_vals[f'{m}_in']), 6) if global_vals[f'{m}_in'] else None
-        writer.writerow(r)
+        w.writerow(r)
 
     def _a(lst): return float(np.mean(lst)) if lst else None
-
     print(f"\nCSV: {csv_path}")
-    print(f"{'='*60}")
-    print(f"总体平均 ({len(global_vals['niqe_out'])} 张):")
-    print(f"{'':>12s} {'输出(修复后)':>14s}  {'输入(模糊)':>14s}")
-    for label in ['mrd'] + NR_METRICS:
-        so = f"{_a(global_vals[f'{label}_out']):.4f}"
-        si = f"{_a(global_vals[f'{label}_in']):.4f}" if global_vals[f'{label}_in'] else "N/A"
-        print(f"  {label.upper():10s} {so:>14s}  {si:>14s}")
-    print(f"{'='*60}")
+    print(f"{'='*70}")
+    print(f"总体平均 ({len(global_vals['localstd_out'])} 张):")
+    print(f"{'':>14s} {'方向':>4s} {'输出':>14s}  {'输入':>14s}")
+    for m in METRICS:
+        so = f"{_a(global_vals[f'{m}_out']):.4f}"
+        si = f"{_a(global_vals[f'{m}_in']):.4f}" if global_vals[f'{m}_in'] else "N/A"
+        print(f"  {m:14s} {DIRECTION[m]:>4s} {so:>14s}  {si:>14s}")
+    print(f"{'='*70}")
 
 
 if __name__ == '__main__':
