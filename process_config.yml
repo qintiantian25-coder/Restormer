@@ -20,7 +20,7 @@ calib: "/root/Qtt/Restormer/背景数据_灯管/非均匀校正系数/YD_SW_A_D_
 stripe_degree: 3
 
 # 推理参数
-tile_w: 1024
-tile_h: 1024
+tile_w: 640
+tile_h: 512
 tile_overlap: 128
-batch: 8
+batch: 24
