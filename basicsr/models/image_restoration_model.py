@@ -234,7 +234,10 @@ class ImageCleanModel(BaseModel):
         cnt = 0
 
         for idx, val_data in enumerate(dataloader):
-            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+            lq_path = val_data['lq_path'][0]
+            subdir = osp.basename(osp.dirname(lq_path))
+            fname = osp.splitext(osp.basename(lq_path))[0]
+            img_name = f'{subdir}_{fname}'
             self.feed_data(val_data)
             test()
             visuals = self.get_current_visuals()
@@ -255,12 +258,14 @@ class ImageCleanModel(BaseModel):
                                              img_name,
                                              f'{img_name}_{current_iter}_gt.png')
                 else:
+                    os.makedirs(osp.join(
+                        self.opt['path']['visualization'], subdir), exist_ok=True)
                     save_img_path = osp.join(
-                        self.opt['path']['visualization'],
-                        f'{img_name}.png')
+                        self.opt['path']['visualization'], subdir,
+                        f'{fname}.png')
                     save_gt_img_path = osp.join(
-                        self.opt['path']['visualization'],
-                        f'{img_name}_gt.png')
+                        self.opt['path']['visualization'], subdir,
+                        f'{fname}_gt.png')
                 imwrite(sr_img, save_img_path)
                 imwrite(gt_img, save_gt_img_path)
 
