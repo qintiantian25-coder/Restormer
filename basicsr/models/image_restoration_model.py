@@ -301,8 +301,8 @@ class ImageCleanModel(BaseModel):
                     vals = '\t'.join(f'{self.metric_results[m]:.6f}' for m in metric_names)
                     f.write(f'{current_iter}\t{vals}\n')
 
-        # ========== 保存最佳模型 + 训练状态 ==========
-        if with_metrics and 'psnr' in self.metric_results:
+        # ========== 保存最佳模型 + 训练状态 (仅训练模式) ==========
+        if self.opt['is_train'] and with_metrics and 'psnr' in self.metric_results:
             current_psnr = self.metric_results['psnr']
             if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
                 if current_psnr > self.best_psnr:
