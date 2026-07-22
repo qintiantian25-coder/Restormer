@@ -107,7 +107,7 @@ train:
 val:
   window_size: 8
   val_freq: 4000               # 每 N iter 验证一次
-  save_img: false
+  save_img: true
   rgb2bgr: false
   use_image: true
   max_minibatch: 8

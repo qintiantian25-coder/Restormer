@@ -256,10 +256,10 @@ class ImageCleanModel(BaseModel):
                                              f'{img_name}_{current_iter}_gt.png')
                 else:
                     save_img_path = osp.join(
-                        self.opt['path']['visualization'], dataset_name,
+                        self.opt['path']['visualization'],
                         f'{img_name}.png')
                     save_gt_img_path = osp.join(
-                        self.opt['path']['visualization'], dataset_name,
+                        self.opt['path']['visualization'],
                         f'{img_name}_gt.png')
                 imwrite(sr_img, save_img_path)
                 imwrite(gt_img, save_gt_img_path)
@@ -288,6 +288,9 @@ class ImageCleanModel(BaseModel):
 
             # write val_log.txt
             if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
+                if 'experiments_root' not in self.opt['path']:
+                    self.opt['path']['experiments_root'] = osp.join(
+                        'experiments', self.opt['name'])
                 val_log_path = os.path.join(self.opt['path']['experiments_root'],
                                             'val_log.txt')
                 metric_names = sorted(self.metric_results.keys())
