@@ -44,18 +44,35 @@ def preprocess_contrast(frame):
 
 
 def preprocess_nuc(frame, K, B, stripe_degree=3):
+    """NUC + 条纹抑制 + 对比度增强."""
     data = (frame - B) / K
+    data = _stripe_suppression(data, stripe_degree)
+    return _contrast_enhance(data)
 
+
+def preprocess_nuc_no_calib(frame, stripe_degree=3):
+    """无 NUC 标定: 仅条纹抑制 + 对比度增强."""
+    data = frame.astype(np.float64)
+    data = _stripe_suppression(data, stripe_degree)
+    return _contrast_enhance(data)
+
+
+def _stripe_suppression(data, degree):
+    """多项式条纹抑制."""
     col_means = data.mean(axis=0)
     x = np.arange(data.shape[1], dtype=np.float64)
-    p = np.polyfit(x, col_means, stripe_degree)
-    data -= (col_means - np.polyval(p, x))
+    p = np.polyfit(x, col_means, degree)
+    data = data - (col_means - np.polyval(p, x))
 
     row_means = data.mean(axis=1)
     y = np.arange(data.shape[0], dtype=np.float64)
-    p = np.polyfit(y, row_means, stripe_degree)
-    data -= (row_means - np.polyval(p, y)).reshape(-1, 1)
+    p = np.polyfit(y, row_means, degree)
+    data = data - (row_means - np.polyval(p, y)).reshape(-1, 1)
+    return data
 
+
+def _contrast_enhance(data):
+    """对比度增强 + gamma."""
     lo, hi = np.quantile(data, 0.001), np.quantile(data, 0.999)
     out = (data - lo) / max(hi - lo, 1e-10)
     out = np.clip(out, 0, 1) ** 0.6
@@ -129,7 +146,8 @@ def main():
     parser.add_argument('--raw_dir', default=None)
     parser.add_argument('--output_dir', default=None)
     parser.add_argument('--weights', default=None)
-    parser.add_argument('--mode', default=None, choices=['contrast', 'nuc'])
+    parser.add_argument('--mode', default=None, choices=['contrast', 'nuc'],
+                        help='Auto-detected from calib if not set')
     parser.add_argument('--calib', default=None)
     parser.add_argument('--stripe_degree', type=int, default=None)
     parser.add_argument('--tile_w', type=int, default=None)
@@ -161,7 +179,7 @@ def main():
     if device.type == 'cuda':
         p = torch.cuda.get_device_properties(device)
         print(f'GPU: {p.name} ({p.total_memory/1024**3:.0f} GB)')
-    print(f'Mode: {args.mode}  Tile: {args.tile_w}x{args.tile_h}  Batch: {args.batch}')
+    print(f'Tile: {args.tile_w}x{args.tile_h}  Batch: {args.batch}')
 
     # --- 模型 ---
     print(f'Loading model...')
@@ -174,11 +192,15 @@ def main():
 
     # --- 标定 (NUC) ---
     K = B = None
+    use_nuc = False
     if args.mode == 'nuc':
-        if not args.calib:
-            sys.exit('--calib required for nuc mode')
-        print(f'Loading calibration: {args.calib}')
-        K, B = load_calib(args.calib)
+        if args.calib and os.path.exists(args.calib):
+            print(f'Loading calibration: {args.calib}')
+            K, B = load_calib(args.calib)
+            use_nuc = True
+        else:
+            print('No calibration file, NUC skipped (stripe suppression only)')
+    print(f'Pipe: {"NUC→stripe→contrast" if use_nuc else ("stripe→contrast" if args.mode=="nuc" else "contrast only")}')
 
     # --- 处理 ---
     files = sorted(glob(os.path.join(args.raw_dir, '*.raw')))
@@ -193,8 +215,11 @@ def main():
         t0 = time.time()
 
         raw = read_raw(p)
-        if args.mode == 'nuc':
+        if use_nuc:
             pre = preprocess_nuc(raw, K, B, args.stripe_degree)
+        elif args.mode == 'nuc':
+            # nuc mode without calib: stripe only, skip NUC part
+            pre = preprocess_nuc_no_calib(raw, args.stripe_degree)
         else:
             pre = preprocess_contrast(raw)
         t1 = time.time()

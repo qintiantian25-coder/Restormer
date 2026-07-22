@@ -1,6 +1,6 @@
 # ============================================================
 #  raw → Restormer 处理管线 配置文件
-#  直接修改下方路径，然后执行:  python process_raw.py
+#  修改下方路径后执行:  python process_raw.py
 # ============================================================
 
 # 输入 raw 文件目录
@@ -12,10 +12,10 @@ output_dir: "results"
 # 模型权重路径
 weights: "experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth"
 
-# 处理模式: contrast (默认) 或 nuc
+# 处理模式: contrast (仅对比度) 或 nuc (条纹抑制+对比度, 有calib则+NUC)
 mode: "contrast"
 
-# 以下仅 nuc 模式需要
+# NUC 标定文件 (nuc 模式下可选, 填了做 NUC, 不填仅条纹抑制)
 calib: ""
 stripe_degree: 3
 
