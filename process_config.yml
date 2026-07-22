@@ -13,10 +13,10 @@ output_dir: "results"
 weights: "experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth"
 
 # 处理模式: contrast (仅对比度) 或 nuc (条纹抑制+对比度, 有calib则+NUC)
-mode: "contrast"
+mode: "nuc"
 
 # NUC 标定文件 (nuc 模式下可选, 填了做 NUC, 不填仅条纹抑制)
-calib: ""
+calib: "/root/Qtt/Restormer/背景数据_灯管/非均匀校正系数/YD_SW_A_D_72000_4hz_xs.mat"
 stripe_degree: 3
 
 # 推理参数
