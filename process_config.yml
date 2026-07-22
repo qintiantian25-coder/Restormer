@@ -22,5 +22,5 @@ stripe_degree: 3
 # 推理参数
 tile_w: 640
 tile_h: 512
-tile_overlap: 128
+tile_overlap: 64
 batch: 24

@@ -105,6 +105,11 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size):
     th, tw = min(th, h), min(tw, w)
     sh, sw = th - overlap, tw - overlap
 
+    # Hanning 2D window for smooth tile blending
+    wy = torch.sin(torch.pi * torch.arange(th, device=device) / (th - 1))
+    wx = torch.sin(torch.pi * torch.arange(tw, device=device) / (tw - 1))
+    window = (wy[:, None] * wx[None, :]).view(1, 1, th, tw)
+
     def starts(dim, t, s):
         r = list(range(0, dim - t + 1, s))
         if r and r[-1] + t < dim: r.append(dim - t)
@@ -124,8 +129,8 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size):
             outs = model(patches)
         outs = torch.clamp(outs, 0, 1)
         for j, (y0, x0) in enumerate(batch_pos):
-            accum[..., y0:y0+th, x0:x0+tw] += outs[j:j+1]
-            count[..., y0:y0+th, x0:x0+tw] += 1.0
+            accum[..., y0:y0+th, x0:x0+tw] += outs[j:j+1] * window
+            count[..., y0:y0+th, x0:x0+tw] += window
         idx += len(batch_pos)
         if idx % (batch_size*4) <= batch_size or idx == total:
             e = time.time() - t0
