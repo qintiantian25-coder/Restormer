@@ -1,6 +1,13 @@
 import logging
+import os
+import sys
 import torch
 from os import path as osp
+
+# 注入路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+sys.path.insert(0, root_dir)
 
 from basicsr.data import create_dataloader, create_dataset
 from basicsr.models import create_model
