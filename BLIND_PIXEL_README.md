@@ -15,13 +15,24 @@ python process_raw.py
 raw_dir: "背景数据_灯管"           # 输入 raw 目录
 output_dir: "results"              # 输出 PNG 目录
 weights: "experiments/.../best_model.pth"
-mode: "contrast"                   # contrast 或 nuc (NUC+条纹抑制)
-# calib: "xxx.mat"                 # nuc 模式必填
-tile_w: 640  #2048
-tile_h: 512  #2048
-tile_overlap: 128
-batch: 8      #16                  # 并行 batch (显存大可调大)
+mode: "contrast"                   # contrast（仅对比度）或 nuc（NUC+条纹抑制+对比度）
+calib: ""                          # nuc 模式标定 .mat，不填则仅条纹抑制
+stripe_degree: 3                   # 条纹抑制多项式阶数
+tile_w: 640                        # 分块宽（必须保持 640×512 训练分辨率，否则分块边界会有痕迹）
+tile_h: 512                        # 分块高
+tile_overlap: 128                  # 相邻分块重叠像素（消除拼接痕迹）
+batch: 24                          # 并行 batch（显存大可调大）
 ```
+
+需约 35.3G 显存，640×512 分块（overlap 128）、batch=24 并行推理，单帧 6000×6000 从 raw 到 PNG 约 12 秒。
+
+### 处理模式
+
+| mode | calib | 管线 |
+|------|-------|------|
+| `contrast` | — | 对比度增强 → Restormer |
+| `nuc` | 有 | NUC → 条纹抑制 → 对比度增强 → Restormer |
+| `nuc` | 无 | 条纹抑制 → 对比度增强 → Restormer |
 
 ### 评估
 
