@@ -39,8 +39,8 @@ datasets:
   val:
     name: ValSet
     type: Dataset_PairedImage_BlindPixel
-    dataroot_gt: data_merged/val_sharp       # ← 验证 GT 路径
-    dataroot_lq: data_merged/val_blur        # ← 验证 blur 路径
+    dataroot_gt: data_merged/test_sharp      # ← 验证 GT 路径
+    dataroot_lq: data_merged/test_blur       # ← 验证 blur 路径
     in_ch: 1
     blind_weight: 0.0
     filename_tmpl: '{}'
@@ -67,7 +67,7 @@ network_g:
 #  路径 — pretrain 可设旧权重做 warm-start
 # ============================================================
 path:
-  pretrain_network_g: ~        # warm-start 时设为旧模型路径
+  pretrain_network_g: experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth
   strict_load_g: true
   resume_state: ~              # 自动检测 latest.pth, 无需手动设
 
@@ -109,7 +109,7 @@ val:
   val_freq: 4000               # 每 N iter 验证一次
   save_img: false
   rgb2bgr: false
-  use_image: false
+  use_image: true
   max_minibatch: 8
 
   metrics:
