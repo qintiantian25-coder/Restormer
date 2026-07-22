@@ -23,4 +23,4 @@ stripe_degree: 3
 tile_w: 640
 tile_h: 512
 tile_overlap: 128
-batch: 24
+batch: 48
