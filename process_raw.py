@@ -227,7 +227,7 @@ def main():
 
         t = torch.from_numpy(pre.astype(np.float32)/255.).unsqueeze(0).unsqueeze(0).to(device)
         hi, wi = t.shape[2], t.shape[3]
-        H = ((hi+8)//8)*8; W = ((wi+8)//8)*8
+        H = ((hi+16)//16)*16; W = ((wi+16)//16)*16
         t = F.pad(t, (0, W-wi, 0, H-hi), 'reflect')
 
         restored = tiled_forward(model, t, args.tile_h, args.tile_w,
