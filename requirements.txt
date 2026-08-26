@@ -1,0 +1,28 @@
+# ============================================================
+#  Restormer 红外盲元修复 — 依赖清单
+#  一键安装见 BLIND_PIXEL_README.md「依赖」章节
+# ============================================================
+
+# --- 核心依赖 (训练 / 推理 / 评估都需要) ---
+torch
+torchvision
+numpy
+opencv-python
+scipy
+h5py                # 读取 NUC 标定 .mat
+PyYAML              # 读取 .yml 训练/推理配置
+einops              # Restormer 的 rearrange
+scikit-image        # 部分测试脚本
+tqdm
+tensorboard         # 训练日志 (tb_logger)
+addict              # BasicSR 依赖
+future              # BasicSR 依赖
+yapf                # BasicSR 依赖
+
+# --- 数据后端 (可选: 仅使用 lmdb 数据集时需要) ---
+lmdb
+natsort
+requests            # 模型/数据集下载
+
+# --- 上游评估 (可选: 仅 Defocus_Deblurring 测试需要) ---
+lpips

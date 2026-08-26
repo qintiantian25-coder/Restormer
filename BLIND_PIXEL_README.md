@@ -114,6 +114,9 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 
 | 文件 | 用途 |
 |------|------|
+| `requirements.txt` | 依赖清单（一键安装入口） |
+| `install_deps.sh` | 依赖一键安装脚本（清华镜像源） |
+| `packages/` | 打包的离线依赖 wheel 文件夹 |
 | `process_raw.py` | raw → 修复 PNG |
 | `process_config.yml` | 推理参数 |
 | `evaluate_nr.py` | 无参考质量评估 |
@@ -124,6 +127,37 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 
 ## 依赖
 
+所有依赖已汇总到 `requirements.txt`，一键安装（清华镜像源）：
+
 ```bash
-pip install torch opencv-python numpy scipy h5py pyyaml -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 方式一: 直接联网安装
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 方式二: 把所有依赖的库打包到一个文件夹 packages/（离线备份 / 内网机器用）
+pip download -r requirements.txt -d packages -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 方式三: 从已打包的 packages/ 文件夹离线安装
+pip install --no-index --find-links=packages -r requirements.txt
 ```
+
+或用脚本一键完成（等价封装上面三条命令）：
+
+```bash
+./install_deps.sh          # 联网安装
+./install_deps.sh bundle   # 打包全部依赖到 packages/ 文件夹
+./install_deps.sh offline  # 从 packages/ 文件夹离线安装
+```
+
+安装完成后，可选执行 `python setup.py develop --no_cuda_ext` 将本仓库注册为可导入包。
+
+依赖清单（详见 `requirements.txt`）:
+
+| 库 | 用途 |
+|----|------|
+| torch / torchvision | 深度学习框架（GPU 版建议用官方渠道安装） |
+| numpy / opencv-python / scipy / scikit-image | 图像处理 |
+| h5py | 读取 NUC 标定 .mat |
+| PyYAML | 读取 .yml 配置 |
+| einops | Restormer 的 rearrange |
+| tensorboard | 训练日志 (tb_logger) |
+| lpips | （可选）Defocus_Deblurring 上游测试 |

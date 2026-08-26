@@ -14,6 +14,8 @@ basicsr/metrics/__pycache__/
 basicsr/__pycache__/
 tb_logger/
 experiments/
+# 离线依赖包 (install_deps.sh bundle 下载的 wheel 文件夹)
+packages/
 # Ignore local/test utility and blind-pixel CSVs and Windows ADS files
 fangzhen.py
 blind_pixel_coords.csv
