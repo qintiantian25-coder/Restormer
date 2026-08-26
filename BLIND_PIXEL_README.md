@@ -18,7 +18,7 @@ weights: "experiments/.../best_model.pth"
 mode: "contrast"                   # contrast（仅对比度）或 nuc（NUC+条纹抑制+对比度）
 calib: ""                          # nuc 模式标定 .mat，不填则仅条纹抑制
 stripe_degree: 3                   # 条纹抑制多项式阶数
-tile_w: 640                        # 分块宽（必须保持 640×512 训练分辨率，否则分块边界会有痕迹）
+tile_w: 640                        # 分块宽（训练 patch 为 384×384，640×512 分块实测无拼接痕迹）
 tile_h: 512                        # 分块高
 tile_overlap: 128                  # 相邻分块重叠像素（消除拼接痕迹）
 batch: 24                          # 并行 batch（显存大可调大）
@@ -45,7 +45,10 @@ python evaluate_nr.py --output <修复图> --input <原图> --save <结果> --th
 | residual_X (%) | ↓ | 像素与 5×5 邻域中值偏差 > X 的占比 |
 | localstd | ↓ | 局部标准差均值 |
 | roughness | ↓ | 归一化 Laplacian 高通能量 |
+| nu | ↓ | 非均匀性（局部均值变异系数） |
 | estsnr | ↑ | Immerkaer 估计信噪比 |
+
+注意：必须显式传 `--output` / `--input` / `--save`（脚本内置默认路径来自其他项目，直接运行会报错）。
 
 ## 训练
 
@@ -59,7 +62,8 @@ data_new/
 └── val_sharp/    001/ ...
 ```
 
-- 640×512 灰度 PNG，文件名一一对应，子目录自动递归扫描
+- 640×512 灰度 PNG（实测 uint8，如 data6/train_blur 共 594 张），文件名一一对应，子目录自动递归扫描
+- 当前仓库实际数据目录是 `data6/`（含 train/val/test 各 blur/sharp）；训练配置里提交的 `data_merged/` 路径不存在，**训练前必须改成实际目录**
 
 ### 修改配置
 
@@ -93,22 +97,33 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 
 ### 续训 / 加轮数
 
-中断后直接重新运行，自动从 `latest.pth` 完整恢复（模型+优化器+scheduler）：
+中断后直接重新运行，自动续训：
 
 ```bash
 ./train.sh Denoising/Options/RealDenosing_BlindPixel_Merged.yml
 ```
 
+续训的自动检测逻辑（`basicsr/train.py`）：
+
+| 存在 `models/latest.pth`? | 行为 |
+|------|------|
+| 有 | 完整恢复（权重 + 优化器 + scheduler + iter 续接） |
+| 无 | 回退用 `best_model.pth` 权重 warm-start，**从 iter 0 重新训练** |
+
+注意：`latest.pth` 仅在验证 PSNR 创新高时生成。旧版训练产物（如当前 `experiments/` 下的目录）没有 `latest.pth`，直接重跑会退化为 warm-start 而非真正续训。
+
 想加 200 轮：把 `iters` 和 `total_iter` 改大，`periods`/`restart_weights`/`eta_mins` 补上对应段数，然后 `./train.sh`。
 
 ### 保存文件
 
-仅两个文件，PSNR 提升时同步更新：
+训练中不做周期保存（`save_checkpoint_freq: 999999`），仅在验证 PSNR 创新高时**成对更新**：
 
 | 文件 | 内容 |
 |------|------|
-| `best_model.pth` | 最佳模型权重 |
-| `latest.pth` | 权重 + 优化器 + scheduler + iter (完整续训状态) |
+| `models/best_model.pth` | 最佳模型权重（仅 params） |
+| `models/latest.pth` | 完整续训状态（权重 + 优化器 + scheduler + iter） |
+
+目录中可能残留的 `net_g_latest.pth`、`training_states/-1.state` 是旧版代码的产物，当前版本不再生成、续训也不会使用，可删除。
 
 ## 文件
 
