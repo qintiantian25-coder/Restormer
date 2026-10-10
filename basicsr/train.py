@@ -138,7 +138,10 @@ def main():
     # parse options, set distributed setting, set ramdom seed
     opt = parse_options(is_train=True)
 
-    torch.backends.cudnn.benchmark = True
+    # 注意: 不要开 cudnn.benchmark. 它会让 cuDNN 枚举卷积实现并为候选方案申请
+    # workspace, 实测在验证阶段(第一次遇到 640×512 的卷积形状)申请过 54.9G,
+    # 24G 卡上直接 OOM. 关掉后整个训练流程峰值 13G (384 patch / batch 1).
+    torch.backends.cudnn.benchmark = False
     # torch.backends.cudnn.deterministic = True
 
     # automatic resume: load latest.pth (完整状态) 或 best_model.pth (仅权重)

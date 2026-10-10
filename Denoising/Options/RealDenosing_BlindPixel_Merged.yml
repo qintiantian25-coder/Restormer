@@ -26,13 +26,13 @@ datasets:
 
     use_shuffle: true
     num_worker_per_gpu: 8
-    batch_size_per_gpu: 4       # 单卡 batch size
+    batch_size_per_gpu: 1       # 数据加载 batch（和 mini_batch_sizes 保持一致，否则加载了会被随机丢弃）
     pin_memory: true
     prefetch_mode: cuda
 
-    mini_batch_sizes: [4]
+    mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
     iters: [180000]             # ← 总迭代次数 (续训时改大)
-    gt_size: 384                # 训练 patch 大小
+    gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
 
@@ -92,7 +92,7 @@ train:
 
   optim_g:
     type: AdamW
-    lr: !!float 3e-4
+    lr: !!float 1e-4            # 配合 batch 1；原先 batch 4 时是 3e-4（改 lr 后直接续训即生效）
     weight_decay: !!float 1e-3
     betas: [0.9, 0.999]
 

@@ -21,10 +21,28 @@ stripe_degree: 3                   # 条纹抑制多项式阶数
 tile_w: 640                        # 分块宽（训练 patch 为 384×384，640×512 分块实测无拼接痕迹）
 tile_h: 512                        # 分块高
 tile_overlap: 128                  # 相邻分块重叠像素（消除拼接痕迹）
-batch: 24                          # 并行 batch（显存大可调大）
+batch: 2                           # 并行 batch，按显存选（见下表）；只影响速度，不影响修复结果
 ```
 
-需约 35.3G 显存，640×512 分块（overlap 128）、batch=24 并行推理，单帧 6000×6000 从 raw 到 PNG 约 12 秒。
+### 显存与耗时（实测）
+
+推理显存只由 **「分块面积 × batch」** 决定，**与整图尺寸无关**——6000×6000 的输入/累加缓冲恒定 ~0.4G，峰值只取决于单个分块。所以 8G 卡照样能推 6000×6000，只是慢一点。
+
+| 分块 | batch | 实测 peak allocated | 适用显存 |
+|------|-------|--------------------|---------|
+| 640×512 | 1 | 2.1 G | 8G |
+| 640×512 | **2** | **3.4 G**（真实 raw 端到端实测 3.5 G，单帧 30 s） | **8G（默认配置）** |
+| 640×512 | 3 | 4.9 G | 8G（卡上无其他进程时） |
+| 640×512 | 8 | 12.2 G | 24G |
+| 640×512 | 16 | 23.7 G | 40G |
+| 640×512 | 24 | 35.3 G | 96G（脚本原先的默认值） |
+| 384×384 | 4 | 3.2 G | 8G（更省，但块数 529 > 192，更慢） |
+
+- 经验公式：`peak ≈ 0.7G + 1.42G × batch`（640×512 分块，fp16 autocast）
+- 上表是脚本打印的 `GPU_mem`（torch peak allocated）；`nvidia-smi` 上看到的一般再高 10~25%（allocator reserved）
+- **OOM 就调小 `batch`，不要缩分块**——分块尺寸影响拼接痕迹，batch 只影响速度
+
+耗时：空闲卡上 batch 24 单帧 6000×6000 约 12 秒；batch 2 在 8G 消费级卡上约 1~3 分钟（随算力浮动，非实测）。
 
 ### 处理模式
 
@@ -55,15 +73,19 @@ python evaluate_nr.py --output <修复图> --input <原图> --save <结果> --th
 ### 数据准备
 
 ```
-data_new/
+data_merged/
 ├── train_blur/   001/ frame_0001.png ...   (含盲元)
 ├── train_sharp/  001/ (一一对应, GT)
 ├── val_blur/     001/ ...
-└── val_sharp/    001/ ...
+├── val_sharp/    001/ ...
+└── test_blur/  test_sharp/ ...
 ```
 
-- 640×512 灰度 PNG（实测 uint8，如 data6/train_blur 共 594 张），文件名一一对应，子目录自动递归扫描
-- 当前仓库实际数据目录是 `data6/`（含 train/val/test 各 blur/sharp）；训练配置里提交的 `data_merged/` 路径不存在，**训练前必须改成实际目录**
+- 640×512 灰度 PNG（uint8），文件名一一对应，子目录自动递归扫描
+- 当前配置指向 `data_merged/`：train 1090 / val 418 / test 455 对。它等于 `data5/`(2094 张) + `data6/`(1832 张) 的合并副本，`data5/`、`data6/` 是原始来源（保留，不再被配置引用）
+- ⚠️ `val:` 段目前指向 **`data_merged/test_*`**（拿 test 集当验证集），`val_*` 目录存在但没被使用；若要改成 `val_*`，PSNR 与历史记录不可直接对比
+- 训练时网络看到的是 `gt_size`(384×384) 的**随机方形裁剪**，640×512 只是数据切片的尺寸（见 `Dataset_PairedImage_BlindPixel.__getitem__`）
+- 推理分块的边长必须 **≥ 训练 patch**（384）才不出边界痕迹；640×512 分块已实测无拼接痕迹
 
 ### 修改配置
 
@@ -72,20 +94,47 @@ data_new/
 ```yaml
 datasets:
   train:
-    dataroot_gt: data_new/train_sharp     # ← 改这里
-    dataroot_lq: data_new/train_blur      # ← 改这里
+    dataroot_gt: data_merged/train_sharp  # ← 改这里
+    dataroot_lq: data_merged/train_blur   # ← 改这里
+    batch_size_per_gpu: 1                 # ← 数据加载 batch（和 mini_batch_sizes 保持一致）
+    mini_batch_sizes: [1]                 # ← 实际训练 batch（按显存选，见下表）
+    gt_size: 384                          # ← 训练 patch，别超过推理分块边长
+    gt_sizes: [384]
     iters: [180000]                       # ← 总迭代数
   val:
-    dataroot_gt: data_new/val_sharp       # ← 改这里
-    dataroot_lq: data_new/val_blur        # ← 改这里
+    dataroot_gt: data_merged/test_sharp   # ← 注意：用的是 test 集
+    dataroot_lq: data_merged/test_blur
 
 train:
   total_iter: 180000                      # ← 和 iters 一致
+  optim_g:
+    lr: !!float 1e-4                      # ← batch 1 配 1e-4（batch 4 时是 3e-4）
   scheduler:
     periods: [60000, 60000, 60000]        # ← 和=total_iter, 每段长度
     restart_weights: [1, 1, 1]            # ← 和 periods 等长
     eta_mins: [0.000001, 0.000001, 0.000001]
 ```
+
+### 训练显存（实测）
+
+训练步显存 ≈ **90 KB × patch 面积(像素) × batch**（fp16 autocast，含梯度与 AdamW 状态），与 patch 是否方形无关：
+
+| 训练 patch | batch | 实测 peak allocated | 适用显存 |
+|-----------|-------|--------------------|---------|
+| 384×384 | **1** | **13.0 G**（真实训练全程含验证实测 12.96 G / reserved 16.6 G） | **24G（默认配置）** |
+| 384×384 | 2 | 25.5 G | 32G |
+| 384×384 | 4 | 50.9 G | 64G+ |
+| 320×320 | 2 | 17.9 G | 24G |
+| 256×256 | 4 | 22.8 G | 24G（余量小） |
+| 512×512 | 1 | 22.6 G | 24G（余量小） |
+| 512×640 | 1 | 28.1 G | ❌ 24G 装不下 |
+
+- 24G 卡的可用预算按 ~22G 算：**patch 面积 × batch ≤ 约 250k 像素**
+- ⚠️ **`basicsr/train.py` 里的 `torch.backends.cudnn.benchmark` 已从 `True` 改成 `False`，不要改回去**：开着它时 cuDNN 会枚举卷积实现并为候选方案申请 workspace，实测在验证阶段（第一次遇到 640×512 卷积形状）申请了 **54.9 G**，24G 卡直接 OOM。关掉后整条链路（训练 + 验证 + 存 checkpoint）峰值才 12.96 G
+- batch 从 4 降到 1 时把 `lr` 一起降（1e-4），否则等效学习率变大
+- 本仓库**不支持梯度累积**（没有 accum 实现），batch 只能真降
+- 想训 512×640 整片需要 32G+ 的卡，或自己给 `TransformerBlock` 加 `torch.utils.checkpoint`
+- val 是整张 640×512 无梯度前向（~2G），与训练步不叠加
 
 ### 训练
 
@@ -131,14 +180,20 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 |------|------|
 | `requirements.txt` | 依赖清单（一键安装入口） |
 | `install_deps.sh` | 依赖一键安装脚本（清华镜像源） |
-| `packages/` | 打包的离线依赖 wheel 文件夹 |
+| `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
-| `process_config.yml` | 推理参数 |
+| `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
-| `Denoising/Options/RealDenosing_BlindPixel_Merged.yml` | 训练配置 |
+| `Denoising/Options/RealDenosing_BlindPixel_Merged.yml` | 训练配置（24G 卡口径：batch 1 / lr 1e-4） |
 | `basicsr/` | 模型引擎 |
-| `experiments/` | 模型产出 |
+| `experiments/RealDenosing_BlindPixel_Merged/` | 当前模型产出（`best_model.pth` / `latest.pth`） |
+| `data_merged/` | 训练数据（= `data5/` + `data6/` 的合并副本） |
+| `data5/`、`data6/` | 原始数据来源（保留，配置里不再引用） |
+| `背景数据_灯管/` | 推理用的 raw 帧 + NUC 标定 `.mat` |
+| `results/` | 推理输出 PNG |
+
+> 表中显存数字的实测环境：torch 2.7.1+cu128，fp16 autocast。显存占用只取决于分块面积与 batch，与显卡型号和整图尺寸无关。
 
 ## 依赖
 

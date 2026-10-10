@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Restormer (CVPR 2022 Oral) is a Vision Transformer for high-resolution image restoration — deraining, motion deblurring, defocus deblurring, and Gaussian/real denoising. Built on the BasicSR toolbox. The core engine lives in `basicsr/`; each task has its own directory with configs, data download scripts, and evaluation code.
 
-**This fork's primary purpose is infrared blind-pixel (dead-pixel) repair** (`红外盲元修复`): a single-GPU, grayscale Restormer trained on paired 640×512 grayscale images (blur = frames with blind pixels, sharp = clean GT), plus a raw-format inference pipeline and no-reference evaluation. The authoritative workflow doc is `BLIND_PIXEL_README.md` (Chinese). The upstream task directories (Deraining, Motion_Deblurring, Defocus_Deblurring, Denoising) remain but are not the active work.
+**This fork's primary purpose is infrared blind-pixel (dead-pixel) repair** (`红外盲元修复`): a single-GPU, grayscale Restormer trained on paired 640×512 grayscale images (blur = frames with blind pixels, sharp = clean GT), plus a raw-format inference pipeline and no-reference evaluation. Target hardware: **24 GB for training, 8 GB for inference** — both configs are sized for that (see the blind-pixel workflow section). The authoritative workflow doc is `BLIND_PIXEL_README.md` (Chinese). The upstream task directories (Deraining, Motion_Deblurring, Defocus_Deblurring, Denoising) remain but are not the active work.
 
 ## Commands
 
@@ -91,11 +91,14 @@ This is the active work in this fork.
 
 ### Training (`Denoising/Options/RealDenosing_BlindPixel_Merged.yml`)
 
-- Grayscale (`inp_channels: 1`), single GPU, fp16, 180k iterations, AdamW 3e-4, L1 loss, val every 4k iters with PSNR/SSIM (computed on grayscale directly, `test_y_channel: false`).
-- **Data layout**: `data6/` (and other `data*` dirs) contain `train_blur/`, `train_sharp/`, `val_blur/`, `val_sharp/`, `test_blur/`, `test_sharp/` — each with numbered subdirectories (`001/`, ...) holding per-frame PNGs; blur/sharp names correspond one-to-one.
+- Grayscale (`inp_channels: 1`), single GPU, fp16, 180k iterations, L1 loss, val every 4k iters with PSNR/SSIM (computed on grayscale directly, `test_y_channel: false`). The config is tuned for a **24 GB training GPU**: `mini_batch_sizes: [1]` + `batch_size_per_gpu: 1` + `lr: 1e-4` (measured 13 GB/step at patch 384). On a 64 GB+ card set both batch fields to 4 and `lr` back to 3e-4 (measured 51 GB/step).
+- **Training VRAM**: ≈ 90 KB × patch area(px) × batch, independent of patch shape (measured at 384²/320²/256²/512²/512×640). Budget rule for 24 GB: patch area × batch ≤ ~250k px. End-to-end verified on the real trainer (train + val + checkpoint save): 12.96 GB allocated / 16.6 GB reserved.
+- **Do not re-enable `torch.backends.cudnn.benchmark`** in `basicsr/train.py` (it is deliberately `False`): with it on, cuDNN's autotuner asked for a **54.9 GB workspace** the first time it saw the 640×512 validation conv shape, which OOMs a 24 GB card. With it off the same run peaks at 12.96 GB.
+- **Data layout**: `data_merged/` is what the config points at (train 1090 / val 418 / test 455 pairs); it is a merge copy of `data5/` (2094) + `data6/` (1832). Each split has `train_blur/`, `train_sharp/`, ... with numbered subdirectories (`001/`, ...) holding 640×512 grayscale PNGs; blur/sharp names correspond one-to-one. Note the `val:` section currently points at `data_merged/test_*` (test set used as validation).
+- Training patches are **random square `gt_size` crops** (384×384) taken from the 640×512 slices — the model never sees a 640×512 or full-frame input during training.
 - To point at new data, edit `dataroot_gt`/`dataroot_lq` for train and val.
-- **Resume**: rerunning `./train.sh` auto-resumes from the latest state — model, optimizer, and scheduler. To extend training, raise `iters` and `train.total_iter` together and append matching entries to `scheduler.periods`/`restart_weights`/`eta_mins` (their sum must equal `total_iter`).
-- **Checkpoints** in `experiments/<name>/`: `models/best_model.pth` (best weights, PSNR-gated), `models/net_g_latest.pth` (latest weights), `training_states/*.state` (full resume state).
+- **Resume**: rerunning `./train.sh` auto-resumes from the latest state — model, optimizer, and scheduler. To extend training, raise `iters` and `train.total_iter` together and append matching entries to `scheduler.periods`/`restart_weights`/`eta_mins` (their sum must equal `total_iter`). Changing `lr` in the YAML does take effect on resume (the scheduler recomputes lr from the YAML value every iteration).
+- **Checkpoints** in `experiments/<name>/`: `models/best_model.pth` (best weights, PSNR-gated) and `models/latest.pth` (full resume state). `net_g_latest.pth` / `training_states/-1.state` are legacy artifacts from older code — no longer written and unused on resume.
 
 ### Inference (`process_raw.py` + `process_config.yml`)
 
@@ -104,7 +107,7 @@ Raw 6000×6000 uint16 `.raw` frames → repaired PNG. Pipeline modes (set in `pr
 - `nuc` with calib `.mat`: NUC (two-point, K/B) → stripe suppression (polynomial fit, `stripe_degree`) → contrast → Restormer
 - `nuc` without calib: stripe suppression only, then contrast
 
-Tiled inference: `tile_w`/`tile_h` (default 640×512) with `tile_overlap` 128, batched (`batch` 24 ≈ 35.3 GB VRAM). **Tile size must match the training patch resolution or tile boundaries will be visible.** ~12 s per 6000×6000 frame.
+Tiled inference: `tile_w`/`tile_h` (default 640×512) with `tile_overlap` 128, batched. **Inference VRAM depends only on tile area × batch — not on the frame size** (the full-image input/accumulate buffers are a constant ~0.4 GB), so an 8 GB GPU can still do 6000×6000. Measured (fp16 autocast): `peak ≈ 0.7 GB + 1.42 GB × batch` at 640×512 tiles → batch 2 = 3.4 GB (8 GB card, current default), batch 8 = 12.2 GB (24 GB), batch 24 = 35.3 GB (96 GB). Verified end-to-end on a real 6000×6000 raw frame at batch 2: 3.5 GB, ~30 s/frame (contended GPU). `batch` changes speed only; **tile side must be ≥ the 384 training patch**, and 640×512 is verified seam-free. ~12 s per 6000×6000 frame at batch 24 on an idle card.
 
 ### Evaluation (`evaluate_nr.py`)
 

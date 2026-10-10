@@ -20,7 +20,10 @@ calib: "/root/Qtt/Restormer/背景数据_灯管/非均匀校正系数/YD_SW_A_D_
 stripe_degree: 3
 
 # 推理参数
+# 显存只由「分块面积 × batch」决定，与整图尺寸无关（6000×6000 整图缓冲恒定 ~0.4G）：
+#   batch 2 → 4.3G（8G 卡）   batch 8 → 15.5G（24G 卡）   batch 24 → 35.3G（96G 卡）
+# batch 只影响速度，不影响修复结果；OOM 就往下调，别缩小分块（会影响拼接痕迹）。
 tile_w: 640
 tile_h: 512
 tile_overlap: 128
-batch: 24
+batch: 2
