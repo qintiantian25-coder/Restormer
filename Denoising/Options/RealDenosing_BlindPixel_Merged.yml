@@ -25,7 +25,7 @@ datasets:
       type: disk
 
     use_shuffle: true
-    num_worker_per_gpu: 8
+    num_worker_per_gpu: 0       # 0 = 不 spawn 子进程(Windows 页面文件不足时 spawn 会报 WinError 1455); 调大页面文件后可回调 4
     batch_size_per_gpu: 1       # 数据加载 batch（和 mini_batch_sizes 保持一致，否则加载了会被随机丢弃）
     pin_memory: true
     prefetch_mode: cuda
@@ -67,7 +67,7 @@ network_g:
 #  路径 — pretrain 可设旧权重做 warm-start
 # ============================================================
 path:
-  pretrain_network_g: experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth
+  pretrain_network_g: experiments/RealDenosing_BlindPixel_Merged_warmstart.pth  # warm-start 副本(位于 experiments 根目录, 不会被归档卷走); 正常运行时 latest.pth 优先, 此项仅在 latest/best 都缺失时生效
   strict_load_g: true
   resume_state: ~              # 自动检测 latest.pth, 无需手动设
 
