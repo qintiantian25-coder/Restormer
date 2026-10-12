@@ -52,6 +52,20 @@ batch: 2                           # 并行 batch，按显存选（见下表）�
 | `nuc` | 有 | NUC → 条纹抑制 → 对比度增强 → Restormer |
 | `nuc` | 无 | 条纹抑制 → 对比度增强 → Restormer |
 
+### 单张 PNG 测试（`infer_png.py`）
+
+测试已经预处理好的模拟图（如 `data_merged/*_sim6000_blind.png`），不做 raw/NUC/条纹/对比度，直接 PNG → Restormer → PNG：
+
+```bash
+python infer_png.py --input data_merged/658_4_sim6000_blind.png \
+    --output results/658_4_repaired.png \
+    --weights experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth \
+    --batch 8
+```
+
+- 可选 `--gt <干净参考图>`：打印 输入 vs 修复后 的 PSNR/SSIM（PSNR 无需额外处理）
+- 分块参数与 `process_raw.py` 一致（640×512 / overlap 128）；`--batch` 按显存调（24G 卡用 8）
+
 ### 评估
 
 ```bash
@@ -196,6 +210,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `install_deps.sh` | 依赖一键安装脚本（清华镜像源） |
 | `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
+| `infer_png.py` | 单张 PNG 测试推理（已预处理图，免 raw 链路） |
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
