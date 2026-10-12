@@ -31,7 +31,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [180000]             # ← 总迭代次数 (续训时改大)
+    iters: [60000]              # ← 总迭代次数 (微调口径: 从收敛模型低 lr 跑 60k)
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -75,7 +75,7 @@ path:
 #  训练参数
 # ============================================================
 train:
-  total_iter: 180000           # ← 总迭代次数 (续训时改大)
+  total_iter: 60000            # ← 总迭代次数 (和 iters 一致)
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度
@@ -83,16 +83,16 @@ train:
 
   scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
-    periods: [60000, 60000, 60000]          # ← 每段长度 (和=total_iter)
-    restart_weights: [1, 1, 1]              # ← 和 periods 等长
-    eta_mins: [0.000001, 0.000001, 0.000001] # ← 和 periods 等长
+    periods: [60000]                        # ← 微调: 单周期余弦 60k (多周期重启会把 lr 打回满值, 不适合微调)
+    restart_weights: [1]                    # ← 和 periods 等长
+    eta_mins: [0.000001]                    # ← 和 periods 等长
 
   mixing_augs:
     mixup: false
 
   optim_g:
     type: AdamW
-    lr: !!float 1e-4            # 配合 batch 1；原先 batch 4 时是 3e-4（改 lr 后直接续训即生效）
+    lr: !!float 2e-5            # 微调口径: 从收敛模型出发需更低 lr (1e-4 会把权重冲散); 从零训练时用 1e-4
     weight_decay: !!float 1e-3
     betas: [0.9, 0.999]
 
