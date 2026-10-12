@@ -3,6 +3,7 @@ import datetime
 import logging
 import math
 import random
+import shutil
 import time
 import torch
 from os import path as osp
@@ -150,9 +151,21 @@ def main():
     resume_state = None
     if osp.exists(latest_pth):
         resume_state = torch.load(latest_pth, map_location='cpu')
-        logger.info(f'Resume from latest.pth (iter {resume_state["iter"]})')
+        # 此处 logger 尚未初始化(见下方 init_loggers), 用 print
+        print(f'Resume from latest.pth (iter {resume_state["iter"]})', flush=True)
     elif osp.exists(best_pth):
-        opt['path']['pretrain_network_g'] = best_pth
+        # make_exp_dirs() 会把已有实验目录改名归档, 其中包含 best_model.pth,
+        # 直接引用原路径会在归档后 FileNotFoundError; 先复制到稳定路径再 warm-start
+        warm_path = osp.join('experiments', f'{opt["name"]}_warmstart.pth')
+        shutil.copyfile(best_pth, warm_path)
+        opt['path']['pretrain_network_g'] = warm_path
+        print(f'Warm-start from {best_pth} (已复制到 {warm_path})', flush=True)
+    else:
+        pretrain = opt['path'].get('pretrain_network_g')
+        if pretrain is not None and not osp.exists(pretrain):
+            # yml 里预训练路径不存在(例如刚清空 experiments/): 按从头训练处理
+            print(f'pretrain_network_g 不存在: {pretrain}, 本次从头训练', flush=True)
+            opt['path']['pretrain_network_g'] = None
 
     # mkdir for experiments and logger
     if resume_state is None:
@@ -177,6 +190,20 @@ def main():
             model.optimizers[i].load_state_dict(o)
         for i, s in enumerate(resume_state['schedulers']):
             model.schedulers[i].load_state_dict(s)
+        # load_state_dict 会用存档值覆盖 periods/restart_weights/eta_mins,
+        # 这里按 YAML 当前值还原, 让「续训时扩轮数」对 scheduler 的修改真正生效
+        sch_opt = opt['train']['scheduler']
+        for sch in model.schedulers:
+            if hasattr(sch, 'periods'):
+                sch.periods = list(sch_opt.get('periods', sch.periods))
+                sch.restart_weights = list(
+                    sch_opt.get('restart_weights', sch.restart_weights))
+                sch.eta_mins = list(sch_opt.get('eta_mins', sch.eta_mins))
+                sch.cumulative_period = [
+                    sum(sch.periods[0:i + 1])
+                    for i in range(0, len(sch.periods))]
+        # 恢复 best_psnr, 避免续训后第一次验证就用更差的 PSNR 覆盖 best_model.pth
+        model.best_psnr = resume_state.get('best_psnr', -float('inf'))
         logger.info(f"Resuming training from iter: {resume_state['iter']}.")
         start_epoch = resume_state.get('epoch', -1)
         current_iter = resume_state['iter']

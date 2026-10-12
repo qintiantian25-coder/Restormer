@@ -161,16 +161,21 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 ./train.sh Denoising/Options/RealDenosing_BlindPixel_Merged.yml
 ```
 
-续训的自动检测逻辑（`basicsr/train.py`）：
+续训的自动检测逻辑（`basicsr/train.py`，三种情况）：
 
-| 存在 `models/latest.pth`? | 行为 |
+| `experiments/<name>/models/` 里有什么 | 行为 |
 |------|------|
-| 有 | 完整恢复（权重 + 优化器 + scheduler + iter 续接） |
-| 无 | 回退用 `best_model.pth` 权重 warm-start，**从 iter 0 重新训练** |
+| `latest.pth` | **完整续训**：权重 + 优化器 + scheduler + iter 续接；实验目录不动（不归档） |
+| 只有 `best_model.pth` | **warm-start**：best 先复制到 `experiments/<name>_warmstart.pth`，旧实验目录归档为 `<name>_archived_<时间戳>`，然后在**新**目录下从 iter 0 重新训练（全新优化器/scheduler） |
+| 都没有（或 yml 里 pretrain 路径失效） | 从头训练（打印提示，不再报 FileNotFoundError） |
 
-注意：`latest.pth` 仅在验证 PSNR 创新高时生成。旧版训练产物（如当前 `experiments/` 下的目录）没有 `latest.pth`，直接重跑会退化为 warm-start 而非真正续训。
+注意：
 
-想加 200 轮：把 `iters` 和 `total_iter` 改大，`periods`/`restart_weights`/`eta_mins` 补上对应段数，然后 `./train.sh`。
+- `latest.pth` 与 `best_model.pth` 在验证 PSNR 创新高时**成对写入**；若只有 `best_model.pth`（旧版产物），重跑就是 warm-start 而不是迭代续接
+- `best_psnr` 随 `latest.pth` 保存并在续训时恢复 → 续训后不会被更差的验证结果覆盖 `best_model.pth`；warm-start 是全新训练，best 会被第一次验证刷新（**开训前建议先备份旧 `best_model.pth`**）
+- **扩数据**：直接往 `data_merged/train_*` 的对应子目录放图即可（文件名与 sharp 一一对应），启动时自动重扫，无需改配置
+- **加轮数**：把 `datasets.train.iters` 与 `train.total_iter` 一起改大，`periods`/`restart_weights`/`eta_mins` 补上对应段数（`sum(periods) == total_iter`）。真续训时 YAML 里新的 `periods` 会覆盖存档里的旧值并立即生效
+- 若 `val:` 指向的 `test_*` 集也变动了，PSNR 与历史记录不可直接对比
 
 ### 保存文件
 

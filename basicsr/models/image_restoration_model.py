@@ -324,6 +324,7 @@ class ImageCleanModel(BaseModel):
                         'params': net_g.state_dict(),
                         'epoch': -1,
                         'iter': current_iter,
+                        'best_psnr': float(self.best_psnr),
                         'optimizers': [o.state_dict() for o in self.optimizers],
                         'schedulers': [s.state_dict() for s in self.schedulers],
                     }
