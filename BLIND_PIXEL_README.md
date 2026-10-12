@@ -74,6 +74,17 @@ python infer_png.py --input data_merged/test_blur --output results/test_blur_eva
 - 分块参数与 `process_raw.py` 一致（640×512 / overlap 128）；`--batch` 按显存调（24G 卡用 8）
 - 640×512 等本身就是 16 倍数的图不会多余 pad，单张 = 一次前向（与训练验证口径一致）
 
+### 块状盲元诊断（`diag_block.py`，不用 GPU）
+
+```bash
+python diag_block.py --blur_dir data_merged/test_blur --gt_dir data_merged/test_sharp \
+    --pred_dir results/test_blur_eval --save_dir results/block_diag
+```
+
+- 盲元判定：`|blur-gt| > thr`（默认 30）的连通域，块 ≥ 6 px
+- 输出：按块大小分桶的 块数 / 修复前误差 / 修复后误差 / 模型改动量；`--save_dir` 下保存最差块的 (blur|gt|pred) 对比拼图
+- 判读：某桶"修复后误差"高 + "模型改动量"≈0 → 模型对该尺寸的块基本没动（能力短板）
+
 ### 评估
 
 ```bash
@@ -218,7 +229,8 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `install_deps.sh` | 依赖一键安装脚本（清华镜像源） |
 | `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
-| `infer_png.py` | 单张 PNG 测试推理（已预处理图，免 raw 链路） |
+| `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路） |
+| `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + 最差样例拼图，不用 GPU） |
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
