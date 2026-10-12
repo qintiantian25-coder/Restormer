@@ -31,7 +31,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [10000]              # ← 探针阶段: 短跑 10k 快速验证 (确认稳定后拉长到 60k)
+    iters: [60000]              # ← 长跑阶段: 探针确认 2e-5 稳定(44.6+)后拉长; 续训从 latest.pth 自动接续
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -75,7 +75,7 @@ path:
 #  训练参数
 # ============================================================
 train:
-  total_iter: 10000            # ← 探针阶段: 和 iters 一致
+  total_iter: 60000            # ← 长跑阶段: 和 iters 一致
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度
@@ -83,7 +83,7 @@ train:
 
   scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
-    periods: [10000]                        # ← 探针阶段: 单周期 10k (确认稳定后改回 [60000])
+    periods: [60000]                        # ← 长跑: 单周期余弦 60k (多周期重启会把 lr 打回满值, 不适合微调)
     restart_weights: [1]                    # ← 和 periods 等长
     eta_mins: [0.000001]                    # ← 和 periods 等长
 
@@ -106,8 +106,8 @@ train:
 # ============================================================
 val:
   window_size: 8
-  val_freq: 1000               # 探针阶段: 每 1k 验证一次快速拿反馈 (确认后改回 4000)
-  save_img: false              # 探针阶段: 不写验证图, 单次验证 5min -> ~2min (确认后可打开)
+  val_freq: 4000               # 长跑阶段: 验证拉回每 4000 一次 (与历史曲线口径一致)
+  save_img: false              # 保持关闭节省验证时间 (要看修复效果用 process_raw.py 推一帧即可)
   rgb2bgr: false
   use_image: true
   max_minibatch: 8
