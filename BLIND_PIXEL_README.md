@@ -231,7 +231,8 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `process_raw.py` | raw → 修复 PNG |
 | `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路） |
 | `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + 最差样例拼图，不用 GPU） |
-| `inspect_dataset.py` | 数据集体检：结构/配对/规格/块状盲元统计（`--root <目录>`） |
+| `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
+| `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z` |
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
