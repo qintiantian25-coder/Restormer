@@ -15,9 +15,9 @@ datasets:
   train:
     name: TrainSet
     type: Dataset_PairedImage_BlindPixel
-    dataroot_gt: data_diff/train_sharp       # ← 干净 GT 路径 (块状盲元专项数据)
-    dataroot_lq: data_diff/train_blur        # ← 含盲元图像路径
-    dataroot_mask: data_diff/train_mask      # ← 盲元 mask (喂给 blind_weight 加权损失)
+    dataroot_gt: data_merged/train_sharp     # ← 干净 GT 路径 (2026-10-12 块状专项试验后改回已验证分布)
+    dataroot_lq: data_merged/train_blur      # ← 含盲元图像路径
+    dataroot_mask: data_merged/train_mask    # ← 盲元 mask (blind_weight 加权; make_masks.py 生成)
     in_ch: 1                                 # 1=灰度, 3=RGB
     blind_weight: 10.0                       # (生效值在 train 段, 此处仅记录)
     geometric_augs: true
@@ -32,7 +32,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [30000]              # ← 块状专项微调 30k (warm-start 自 45.38 best)
+    iters: [30000]              # ← 加权损失微调 30k (数据=data_merged+mask; warm-start 自 45.38)
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -76,7 +76,7 @@ path:
 #  训练参数
 # ============================================================
 train:
-  total_iter: 30000            # ← 块状专项微调: 和 iters 一致
+  total_iter: 30000            # ← 和 iters 一致
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度

@@ -136,9 +136,9 @@ python tests/test_blindpixel_dataset.py     # 也可被 pytest 收集
 ```yaml
 datasets:
   train:
-    dataroot_gt: data_diff/train_sharp    # ← 训练 GT（当前: 块状专项数据 data_diff）
-    dataroot_lq: data_diff/train_blur     # ← 训练 blur
-    dataroot_mask: data_diff/train_mask   # ← 盲元 mask（blind_weight 加权损失用, make_masks.py 生成）
+    dataroot_gt: data_merged/train_sharp  # ← 训练 GT（当前: 已验证分布 + 加权损失）
+    dataroot_lq: data_merged/train_blur   # ← 训练 blur
+    dataroot_mask: data_merged/train_mask # ← 盲元 mask（blind_weight 加权损失用, make_masks.py 生成）
     blind_weight: 10.0                    # ← 盲元像素损失权重
     batch_size_per_gpu: 1                 # ← 数据加载 batch（和 mini_batch_sizes 保持一致）
     mini_batch_sizes: [1]                 # ← 实际训练 batch（按显存选，见下表）
