@@ -136,25 +136,28 @@ python tests/test_blindpixel_dataset.py     # 也可被 pytest 收集
 ```yaml
 datasets:
   train:
-    dataroot_gt: data_merged/train_sharp  # ← 改这里
-    dataroot_lq: data_merged/train_blur   # ← 改这里
+    dataroot_gt: data_diff/train_sharp    # ← 训练 GT（当前: 块状专项数据 data_diff）
+    dataroot_lq: data_diff/train_blur     # ← 训练 blur
+    dataroot_mask: data_diff/train_mask   # ← 盲元 mask（blind_weight 加权损失用, make_masks.py 生成）
+    blind_weight: 10.0                    # ← 盲元像素损失权重
     batch_size_per_gpu: 1                 # ← 数据加载 batch（和 mini_batch_sizes 保持一致）
     mini_batch_sizes: [1]                 # ← 实际训练 batch（按显存选，见下表）
     gt_size: 384                          # ← 训练 patch，别超过推理分块边长
     gt_sizes: [384]
-    iters: [180000]                       # ← 总迭代数
+    iters: [30000]                        # ← 总迭代数
   val:
     dataroot_gt: data_merged/val_sharp    # ← 验证集 (2026-10-12 起用 val_*; test_* 留给纯测试)
     dataroot_lq: data_merged/val_blur
 
 train:
-  total_iter: 180000                      # ← 和 iters 一致
+  total_iter: 30000                       # ← 和 iters 一致
+  blind_weight: 10.0                      # ← 盲元加权（生效值; 与数据集 mask 配套）
   optim_g:
-    lr: !!float 1e-4                      # ← batch 1 配 1e-4（batch 4 时是 3e-4）
+    lr: !!float 2e-5                      # ← 微调口径（从零训练用 1e-4）
   scheduler:
-    periods: [60000, 60000, 60000]        # ← 和=total_iter, 每段长度
-    restart_weights: [1, 1, 1]            # ← 和 periods 等长
-    eta_mins: [0.000001, 0.000001, 0.000001]
+    periods: [30000]                      # ← 和=total_iter（单周期余弦; 多周期重启会把 lr 打回满值, 不适合微调）
+    restart_weights: [1]                  # ← 和 periods 等长
+    eta_mins: [0.000001]
 ```
 
 ### 训练显存（实测）

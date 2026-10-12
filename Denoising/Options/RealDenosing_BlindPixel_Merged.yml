@@ -15,10 +15,11 @@ datasets:
   train:
     name: TrainSet
     type: Dataset_PairedImage_BlindPixel
-    dataroot_gt: data_merged/train_sharp     # ← 干净 GT 路径
-    dataroot_lq: data_merged/train_blur      # ← 含盲元图像路径
+    dataroot_gt: data_diff/train_sharp       # ← 干净 GT 路径 (块状盲元专项数据)
+    dataroot_lq: data_diff/train_blur        # ← 含盲元图像路径
+    dataroot_mask: data_diff/train_mask      # ← 盲元 mask (喂给 blind_weight 加权损失)
     in_ch: 1                                 # 1=灰度, 3=RGB
-    blind_weight: 0.0
+    blind_weight: 10.0                       # (生效值在 train 段, 此处仅记录)
     geometric_augs: true
     filename_tmpl: '{}'
     io_backend:
@@ -31,7 +32,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [60000]              # ← 长跑阶段: 探针确认 2e-5 稳定(44.6+)后拉长; 续训从 latest.pth 自动接续
+    iters: [30000]              # ← 块状专项微调 30k (warm-start 自 45.38 best)
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -75,15 +76,15 @@ path:
 #  训练参数
 # ============================================================
 train:
-  total_iter: 60000            # ← 长跑阶段: 和 iters 一致
+  total_iter: 30000            # ← 块状专项微调: 和 iters 一致
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度
-  blind_weight: 0.0
+  blind_weight: 10.0           # 盲元像素损失权重 (需数据集提供 mask; 1=不加权)
 
   scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
-    periods: [60000]                        # ← 长跑: 单周期余弦 60k (多周期重启会把 lr 打回满值, 不适合微调)
+    periods: [30000]                        # ← 单周期余弦 30k (微调口径; 多周期重启会把 lr 打回满值)
     restart_weights: [1]                    # ← 和 periods 等长
     eta_mins: [0.000001]                    # ← 和 periods 等长
 
