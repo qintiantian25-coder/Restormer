@@ -52,19 +52,27 @@ batch: 2                           # 并行 batch，按显存选（见下表）�
 | `nuc` | 有 | NUC → 条纹抑制 → 对比度增强 → Restormer |
 | `nuc` | 无 | 条纹抑制 → 对比度增强 → Restormer |
 
-### 单张 PNG 测试（`infer_png.py`）
+### PNG 推理（`infer_png.py`）— 单张 / 目录
 
-测试已经预处理好的模拟图（如 `data_merged/*_sim6000_blind.png`），不做 raw/NUC/条纹/对比度，直接 PNG → Restormer → PNG：
+测试已经预处理好的 PNG，不做 raw/NUC/条纹/对比度，直接 PNG → Restormer → PNG。支持单张和整个目录（递归扫描、保持子目录结构）：
 
 ```bash
+# 单张
 python infer_png.py --input data_merged/658_4_sim6000_blind.png \
     --output results/658_4_repaired.png \
     --weights experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth \
     --batch 8
+
+# 整个目录 (如 test_blur 723 张); --gt 传配对目录则打印平均 PSNR/SSIM
+python infer_png.py --input data_merged/test_blur --output results/test_blur_eval \
+    --gt data_merged/test_sharp \
+    --weights experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth \
+    --batch 8
 ```
 
-- 可选 `--gt <干净参考图>`：打印 输入 vs 修复后 的 PSNR/SSIM（PSNR 无需额外处理）
+- 单张模式可选 `--gt <干净参考图>`；目录模式加 `--limit N` 可只跑前 N 张快速预览
 - 分块参数与 `process_raw.py` 一致（640×512 / overlap 128）；`--batch` 按显存调（24G 卡用 8）
+- 640×512 等本身就是 16 倍数的图不会多余 pad，单张 = 一次前向（与训练验证口径一致）
 
 ### 评估
 

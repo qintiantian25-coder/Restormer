@@ -1,19 +1,26 @@
 """
-单张 PNG 的修复推理 (测试/验收用).
+PNG 修复推理 (测试/验收用): 单张 或 整个目录.
 
 与 process_raw.py 的区别: 直接读 PNG (不做 raw/NUC/条纹/对比度预处理),
-适合测试已经预处理好的模拟图 (如 data_merged/*_sim6000_blind.png)。
+适合测试已经预处理好的模拟图 / 用配对数据做离线评估。
 
-用法 (在项目根目录运行):
+单张模式 (在项目根目录运行):
   python infer_png.py --input data_merged/658_4_sim6000_blind.png \
       --output results/658_4_repaired.png \
       --weights experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth \
       --batch 8
 
-  # 可选: 若有干净参考图, 顺手加 --gt 会打印 输入/修复后 的 PSNR 对比
-  python infer_png.py --input ... --output ... --gt data_merged/658_4_sim6000.png ...
+目录模式 (递归处理所有 *.png, 保持子目录结构输出; --gt 传配对目录则算平均指标):
+  python infer_png.py --input data_merged/test_blur --output results/test_blur_eval \
+      --gt data_merged/test_sharp \
+      --weights experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth \
+      --batch 8
+
+  # 只处理前 20 张快速预览:
+  ... --limit 20
 """
 import argparse
+import glob
 import os
 import time
 
@@ -26,18 +33,41 @@ from basicsr.models.archs.restormer_arch import Restormer
 from process_raw import tiled_forward
 
 
+def load_gray(path):
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise SystemExit(f'读不到图片: {path}')
+    if img.dtype == np.uint16:
+        img = (img.astype(np.float32) / 65535. * 255).round().astype(np.uint8)
+    if img.ndim == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return img
+
+
+def restore(model, img, device, tile_h, tile_w, overlap, batch_size):
+    hi, wi = img.shape
+    t = torch.from_numpy(img.astype(np.float32) / 255.).unsqueeze(0).unsqueeze(0).to(device)
+    # pad 到 16 的倍数 (已经是倍数则不 pad)
+    H = hi if hi % 16 == 0 else ((hi + 15) // 16) * 16
+    W = wi if wi % 16 == 0 else ((wi + 15) // 16) * 16
+    t = F.pad(t, (0, W - wi, 0, H - hi), 'reflect')
+    out = tiled_forward(model, t, tile_h, tile_w, overlap, device, batch_size)
+    out = out[:, :, :hi, :wi]
+    return (out.squeeze().cpu().numpy() * 255).round().clip(0, 255).astype(np.uint8)
+
+
 def main():
-    parser = argparse.ArgumentParser(description='PNG -> Restormer -> PNG')
-    parser.add_argument('--input', required=True, help='输入 PNG 路径')
-    parser.add_argument('--output', required=True, help='输出 PNG 路径')
+    parser = argparse.ArgumentParser(description='PNG -> Restormer -> PNG (单张或目录)')
+    parser.add_argument('--input', required=True, help='输入 PNG 或 目录')
+    parser.add_argument('--output', required=True, help='输出 PNG (单张) 或 目录')
     parser.add_argument('--weights', default=None,
                         help='best_model.pth; 省略则随机初始化(仅用于管道自检)')
-    parser.add_argument('--gt', default=None,
-                        help='可选: 干净参考图, 提供后会计算 输入/修复后 的 PSNR/SSIM')
+    parser.add_argument('--gt', default=None, help='可选: 干净参考(文件或目录), 提供后计算 PSNR/SSIM')
     parser.add_argument('--tile_w', type=int, default=640)
     parser.add_argument('--tile_h', type=int, default=512)
     parser.add_argument('--overlap', type=int, default=128)
     parser.add_argument('--batch', type=int, default=8)
+    parser.add_argument('--limit', type=int, default=0, help='目录模式: 只处理前 N 张 (0=全部)')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -46,18 +76,7 @@ def main():
         p = torch.cuda.get_device_properties(device)
         print(f'GPU: {p.name} ({p.total_memory/1024**3:.0f} GB)')
 
-    # --- 读图 ---
-    img = cv2.imread(args.input, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        raise SystemExit(f'读不到图片: {args.input}')
-    if img.dtype == np.uint16:
-        img = (img.astype(np.float32) / 65535. * 255).round().astype(np.uint8)
-    if img.ndim == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    hi, wi = img.shape
-    print(f'Input: {args.input}  尺寸 {wi}x{hi} (宽x高)  dtype={img.dtype}')
-
-    # --- 模型 ---
+    # --- 模型 (先建, 两种模式共用) ---
     model = Restormer(inp_channels=1, out_channels=1, dim=48,
                       num_blocks=[4, 6, 6, 8], num_refinement_blocks=4,
                       heads=[1, 2, 4, 8], ffn_expansion_factor=2.66,
@@ -71,39 +90,83 @@ def main():
         print('WARNING: 未提供 --weights, 使用随机初始化 (仅用于管道自检)')
     model.eval()
 
-    # --- 分块推理 (与 process_raw 同一套: reflect pad 到 16 倍数 -> 640x512 滑窗 -> 平均融合) ---
-    t = torch.from_numpy(img.astype(np.float32) / 255.).unsqueeze(0).unsqueeze(0).to(device)
-    H = ((hi + 16) // 16) * 16
-    W = ((wi + 16) // 16) * 16
-    t = F.pad(t, (0, W - wi, 0, H - hi), 'reflect')
+    is_dir = os.path.isdir(args.input)
 
-    t0 = time.time()
-    out = tiled_forward(model, t, args.tile_h, args.tile_w, args.overlap,
-                        device, args.batch)
-    out = out[:, :, :hi, :wi]
-    dt = time.time() - t0
+    if not is_dir:
+        # ---------- 单张模式 ----------
+        img = load_gray(args.input)
+        hi, wi = img.shape
+        print(f'Input: {args.input}  尺寸 {wi}x{hi} (宽x高)')
+        t0 = time.time()
+        out_u8 = restore(model, img, device, args.tile_h, args.tile_w, args.overlap, args.batch)
+        dt = time.time() - t0
+        os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+        cv2.imwrite(args.output, out_u8)
+        mem = torch.cuda.max_memory_allocated(device) / 1024**3 if device.type == 'cuda' else 0
+        print(f'Output: {args.output}  用时 {dt:.1f}s  峰值显存 {mem:.1f}G')
+        if args.gt:
+            gt = load_gray(args.gt)
+            if gt.shape != out_u8.shape:
+                raise SystemExit(f'GT 尺寸 {gt.shape} 与输出 {out_u8.shape} 不一致')
+            import basicsr.metrics as metrics
+            psnr_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
+            psnr_out = metrics.calculate_psnr(out_u8, gt, crop_border=0, test_y_channel=False)
+            ssim_out = metrics.calculate_ssim(out_u8, gt, crop_border=0, test_y_channel=False)
+            print(f'PSNR: 输入 {psnr_in:.4f} dB -> 修复后 {psnr_out:.4f} dB '
+                  f'(提升 {psnr_out - psnr_in:+.4f} dB)')
+            print(f'SSIM: 修复后 {ssim_out:.4f}')
+        return
 
-    out_u8 = (out.squeeze().cpu().numpy() * 255).round().clip(0, 255).astype(np.uint8)
-    out_dir = os.path.dirname(os.path.abspath(args.output))
-    os.makedirs(out_dir, exist_ok=True)
-    cv2.imwrite(args.output, out_u8)
-    mem = torch.cuda.max_memory_allocated(device) / 1024**3 if device.type == 'cuda' else 0
-    print(f'Output: {args.output}  用时 {dt:.1f}s  峰值显存 {mem:.1f}G')
+    # ---------- 目录模式 ----------
+    files = sorted(glob.glob(os.path.join(args.input, '**', '*.png'), recursive=True))
+    if args.limit:
+        files = files[:args.limit]
+    if not files:
+        raise SystemExit(f'目录里没有 *.png: {args.input}')
+    print(f'共 {len(files)} 张 -> {args.output}'
+          + (f'  (GT: {args.gt})' if args.gt else ''))
 
-    # --- 可选: 有 GT 就算指标 ---
-    if args.gt:
-        gt = cv2.imread(args.gt, cv2.IMREAD_GRAYSCALE)
-        if gt is None:
-            raise SystemExit(f'GT 读不到: {args.gt}')
-        if gt.shape != out_u8.shape:
-            raise SystemExit(f'GT 尺寸 {gt.shape} 与输出 {out_u8.shape} 不一致')
-        import basicsr.metrics as metrics
-        psnr_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
-        psnr_out = metrics.calculate_psnr(out_u8, gt, crop_border=0, test_y_channel=False)
-        ssim_out = metrics.calculate_ssim(out_u8, gt, crop_border=0, test_y_channel=False)
-        print(f'PSNR: 输入 {psnr_in:.4f} dB -> 修复后 {psnr_out:.4f} dB '
-              f'(提升 {psnr_out - psnr_in:+.4f} dB)')
-        print(f'SSIM: 修复后 {ssim_out:.4f}')
+    import basicsr.metrics as metrics
+    t_all = time.time()
+    psnrs_in, psnrs_out, ssims_out, skipped_gt = [], [], [], 0
+    for i, f in enumerate(files, 1):
+        rel = os.path.relpath(f, args.input)
+        out_path = os.path.join(args.output, rel)
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        img = load_gray(f)
+        out_u8 = restore(model, img, device, args.tile_h, args.tile_w, args.overlap, args.batch)
+        cv2.imwrite(out_path, out_u8)
+
+        line = f'[{i}/{len(files)}] {rel}'
+        if args.gt:
+            gt_path = os.path.join(args.gt, rel)
+            if os.path.exists(gt_path):
+                gt = load_gray(gt_path)
+                if gt.shape == out_u8.shape:
+                    p_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
+                    p_out = metrics.calculate_psnr(out_u8, gt, crop_border=0, test_y_channel=False)
+                    s_out = metrics.calculate_ssim(out_u8, gt, crop_border=0, test_y_channel=False)
+                    psnrs_in.append(p_in); psnrs_out.append(p_out); ssims_out.append(s_out)
+                    line += f'  PSNR {p_in:.2f} -> {p_out:.2f}  SSIM {s_out:.4f}'
+                else:
+                    skipped_gt += 1
+                    line += '  [GT 尺寸不一致, 跳过]'
+            else:
+                skipped_gt += 1
+                line += '  [无对应 GT, 跳过指标]'
+        print(line, flush=True)
+
+    dt = time.time() - t_all
+    print(f'\n完成: {len(files)} 张, 总用时 {dt/60:.1f} 分钟'
+          + (f', 峰值显存 {torch.cuda.max_memory_allocated(device)/1024**3:.1f}G'
+             if device.type == 'cuda' else ''))
+    if psnrs_out:
+        print(f'===== 平均指标 ({len(psnrs_out)} 张) =====')
+        print(f'PSNR: 输入 {np.mean(psnrs_in):.4f} dB -> 修复后 {np.mean(psnrs_out):.4f} dB '
+              f'(平均提升 {np.mean(psnrs_out) - np.mean(psnrs_in):+.4f} dB)')
+        print(f'SSIM: {np.mean(ssims_out):.4f}')
+    if skipped_gt:
+        print(f'注意: {skipped_gt} 张因缺 GT/尺寸不符未计入平均指标')
 
 
 if __name__ == '__main__':
