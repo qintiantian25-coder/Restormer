@@ -1,5 +1,5 @@
 """
-数据集体检: 结构 / 配对 / 图片规格 / 块状盲元统计.
+数据集体检: 结构 / 配对 / 规格 / 配对质量 / 块状盲元统计.
 
 用法 (项目根目录):
   python inspect_dataset.py --root data_diff
@@ -53,7 +53,7 @@ def load8(path):
 def main():
     ap = argparse.ArgumentParser(description='数据集体检')
     ap.add_argument('--root', required=True, help='数据集根目录')
-    ap.add_argument('--limit', type=int, default=0, help='块状统计最多扫描多少对 (0=全部)')
+    ap.add_argument('--limit', type=int, default=0, help='扫描最多多少对 (0=全部)')
     ap.add_argument('--thr', type=int, default=30, help='盲元判定阈值 |blur-gt| (uint8 尺度)')
     ap.add_argument('--min_block', type=int, default=6, help='连通域最小像素数')
     args = ap.parse_args()
@@ -76,6 +76,8 @@ def main():
     files = sorted(glob.glob(os.path.join(root, '**', '*.png'), recursive=True))
     rels = [os.path.relpath(f, root) for f in files]
     groups = defaultdict(lambda: {'blur': [], 'sharp': []})
+    dir_side = defaultdict(lambda: {'blur': 0, 'sharp': 0})   # 归一化目录 -> 两侧文件数
+    real_dirs = defaultdict(lambda: {'blur': set(), 'sharp': set()})  # 归一化目录 -> 真实目录名
     n_unrecog = 0
     for rel in rels:
         s = side_of(rel)
@@ -84,13 +86,23 @@ def main():
             n_unrecog += 1
             continue
         groups[k][s].append(rel)
+        kdir = os.path.dirname(k)
+        dir_side[kdir][s] += 1
+        real_dirs[kdir][s].add(os.path.dirname(rel))
     n_pairs = sum(1 for g in groups.values() if g['blur'] and g['sharp'])
     n_blur_only = sum(len(g['blur']) for g in groups.values() if g['blur'] and not g['sharp'])
     n_sharp_only = sum(len(g['sharp']) for g in groups.values() if g['sharp'] and not g['blur'])
-    n_multi = sum(1 for g in groups.values() if len(g['blur']) > 1 or len(g['sharp']) > 1)
     print(f'\n[2] 配对情况 (blur/lq/input 与 sharp/gt 同路径配对)')
     print(f'    成功配对: {n_pairs} 对 | blur 落单: {n_blur_only} | sharp 落单: {n_sharp_only}'
-          f' | 未识别: {n_unrecog} | 重复key: {n_multi}')
+          f' | 未识别: {n_unrecog}')
+    only_b = sorted(d for d, c in dir_side.items() if c['blur'] and not c['sharp'])
+    only_s = sorted(d for d, c in dir_side.items() if c['sharp'] and not c['blur'])
+    if only_b or only_s:
+        b_names = [n for d in only_b for n in sorted(real_dirs[d]['blur'])]
+        s_names = [n for d in only_s for n in sorted(real_dirs[d]['sharp'])]
+        print(f'    !! 只在 blur 侧的子目录({len(b_names)}): ' + ', '.join(b_names[:12]))
+        print(f'    !! 只在 sharp 侧的子目录({len(s_names)}): ' + ', '.join(s_names[:12]))
+        print('    -> 两侧编号对不上时, 按名配对的部分可能是"错场景配对", 看 [5] 质量校验')
     if n_pairs:
         sample = next(g for g in groups.values() if g['blur'] and g['sharp'])
         print(f'    示例: {sample["blur"][0]}  <->  {sample["sharp"][0]}')
@@ -98,10 +110,7 @@ def main():
     # ---------- [3] 图片规格 ----------
     pair_list = sorted((g['blur'][0], g['sharp'][0])
                        for g in groups.values() if g['blur'] and g['sharp'])
-    if args.limit:
-        scan = pair_list[:args.limit]
-    else:
-        scan = pair_list
+    scan = pair_list[:args.limit] if args.limit else pair_list
     show = min(5, len(pair_list))
     print(f'\n[3] 图片规格 (抽查 {show} 对)')
     for b, s in pair_list[:show]:
@@ -111,7 +120,7 @@ def main():
         fs = f'{raw_s.shape[1]}x{raw_s.shape[0]} {raw_s.dtype}' if raw_s is not None else '读失败'
         print(f'    {b}: {fb}  |  sharp: {fs}')
 
-    # ---------- [4] 块状盲元统计 ----------
+    # ---------- [4][5] 逐对扫描 ----------
     print(f'\n[4] 块状盲元统计 (|blur-gt|>{args.thr}, 块>={args.min_block}px)  扫描 {len(scan)} 对')
     bucket = {b: [0, 0] for b in BUCKETS}
     n_img_scan = n_img_block = bad = 0
@@ -119,6 +128,7 @@ def main():
     n_mask_px = vals_dark = vals_bright = 0
     val_sum = 0.0
     min_side = 10**9
+    mdiffs, suspicious = [], []
     for b, s in scan:
         ib = load8(os.path.join(root, b))
         ish = load8(os.path.join(root, s))
@@ -127,7 +137,15 @@ def main():
             continue
         n_img_scan += 1
         min_side = min(min_side, min(ib.shape))
-        mask = (cv2.absdiff(ib, ish) > args.thr).astype(np.uint8)
+        diff = cv2.absdiff(ib, ish)
+        # [5] 配对质量: 正确配对只有盲元处有差(本数据集约<15%像素), 错场景会全图差异
+        md = float(diff.mean())
+        frac = float((diff > args.thr).mean())
+        mdiffs.append(md)
+        split = b.split(os.sep)[0].split('_')[0].lower()
+        if md > 25 or frac > 0.35:
+            suspicious.append((md, frac, split, b, s))
+        mask = (diff > args.thr).astype(np.uint8)
         n = int(mask.sum())
         if n == 0:
             continue
@@ -168,6 +186,23 @@ def main():
     if n_mask_px:
         print(f'    盲元填充值(blur侧): 均值 {val_sum / n_mask_px:.0f} | <10(黑) {100.0 * vals_dark / n_mask_px:.0f}%'
               f' | >245(白) {100.0 * vals_bright / n_mask_px:.0f}% | 盲元像素共 {n_mask_px}')
+
+    # ---------- [5] 配对质量 ----------
+    if mdiffs:
+        md = np.array(mdiffs)
+        print(f'\n[5] 配对质量校验 (blur/sharp 是否同一场景)')
+        print(f'    mean|blur-sharp|: 中位数 {np.median(md):.1f}, 90分位 {np.percentile(md, 90):.1f}, 最大 {md.max():.1f}'
+              f'  (正确配对≈盲元占比的均值, 错场景会显著偏大)')
+        per_split = defaultdict(int)
+        for _, _, sp, _, _ in suspicious:
+            per_split[sp] += 1
+        split_str = ' | '.join(f'{k}: {v}' for k, v in sorted(per_split.items())) or '无'
+        print(f'    可疑错配 (mean>25 或 diff>30 像素占比>35%): {len(suspicious)} / {n_img_scan}  ({split_str})')
+        suspicious.sort(key=lambda x: -x[0])
+        for mdv, fr, sp, bp, spth in suspicious[:15]:
+            print(f'      [{sp}] {bp}  <->  {spth}   mean={mdv:.0f} frac={fr:.2f}')
+        if len(suspicious) > 15:
+            print(f'      ... 其余 {len(suspicious) - 15} 对省略')
 
 
 if __name__ == '__main__':
