@@ -86,6 +86,15 @@ data_merged/
 - ⚠️ `val:` 段目前指向 **`data_merged/test_*`**（拿 test 集当验证集），`val_*` 目录存在但没被使用；若要改成 `val_*`，PSNR 与历史记录不可直接对比
 - 训练时网络看到的是 `gt_size`(384×384) 的**随机方形裁剪**，640×512 只是数据切片的尺寸（见 `Dataset_PairedImage_BlindPixel.__getitem__`）
 - 推理分块的边长必须 **≥ 训练 patch**（384）才不出边界痕迹；640×512 分块已实测无拼接痕迹
+- 小于 `gt_size` 的切片会先 reflect padding 再裁剪（`paired_image_dataset.py` 的 padding 分支）。该分支曾因 `cv2.copyMakeBorder` 把单通道 `(H,W,1)` 压成 `(H,W)` 而返回 `(1,gt_size)` 的错误形状，已修复（`img_lq/img_gt` 补回通道维），并有回归测试覆盖
+
+### 回归测试
+
+```bash
+python tests/test_blindpixel_dataset.py     # 也可被 pytest 收集
+```
+
+覆盖：640×512 正常裁剪路径、小尺寸切片 padding 路径（单轴 300×400 / 双轴 200×300）、blur/GT/mask 逐像素对齐（含随机几何增强）、val 相位整图不裁剪。改动数据集代码后应重跑。
 
 ### 修改配置
 
@@ -185,6 +194,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
+| `tests/test_blindpixel_dataset.py` | 数据集回归测试（裁剪/增强对齐 + padding 路径） |
 | `Denoising/Options/RealDenosing_BlindPixel_Merged.yml` | 训练配置（24G 卡口径：batch 1 / lr 1e-4） |
 | `basicsr/` | 模型引擎 |
 | `experiments/RealDenosing_BlindPixel_Merged/` | 当前模型产出（`best_model.pth` / `latest.pth`） |

@@ -280,9 +280,14 @@ class Dataset_PairedImage_BlindPixel(data.Dataset):
             h_pad = max(0, gt_size - h)
             w_pad = max(0, gt_size - w)
             if h_pad > 0 or w_pad > 0:
+                # cv2.copyMakeBorder collapses single-channel (H,W,1) to (H,W) - restore the channel dim
                 img_lq = cv2.copyMakeBorder(img_lq, 0, h_pad, 0, w_pad, cv2.BORDER_REFLECT)
                 img_gt = cv2.copyMakeBorder(img_gt, 0, h_pad, 0, w_pad, cv2.BORDER_REFLECT)
                 img_mask = cv2.copyMakeBorder(img_mask, 0, h_pad, 0, w_pad, cv2.BORDER_REFLECT)
+                if img_lq.ndim == 2:
+                    img_lq = img_lq[..., None]
+                if img_gt.ndim == 2:
+                    img_gt = img_gt[..., None]
 
             # random crop with same coordinates
             h, w = img_lq.shape[:2]
