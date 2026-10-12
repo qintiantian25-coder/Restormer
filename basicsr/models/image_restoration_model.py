@@ -325,6 +325,7 @@ class ImageCleanModel(BaseModel):
                         'epoch': -1,
                         'iter': current_iter,
                         'best_psnr': float(self.best_psnr),
+                        'val_gt': self.opt['datasets']['val'].get('dataroot_gt'),  # 用于检测验证集是否更换
                         'optimizers': [o.state_dict() for o in self.optimizers],
                         'schedulers': [s.state_dict() for s in self.schedulers],
                     }

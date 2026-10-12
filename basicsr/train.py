@@ -204,6 +204,12 @@ def main():
                     for i in range(0, len(sch.periods))]
         # 恢复 best_psnr, 避免续训后第一次验证就用更差的 PSNR 覆盖 best_model.pth
         model.best_psnr = resume_state.get('best_psnr', -float('inf'))
+        # 验证集更换过(如 test_* -> val_*)时新旧 PSNR 不可比, 重置门槛从头门控
+        saved_val = resume_state.get('val_gt')
+        cur_val = opt['datasets']['val'].get('dataroot_gt')
+        if saved_val is not None and saved_val != cur_val:
+            logger.info(f'验证集已更换 ({saved_val} -> {cur_val}), best_psnr 重置')
+            model.best_psnr = -float('inf')
         logger.info(f"Resuming training from iter: {resume_state['iter']}.")
         start_epoch = resume_state.get('epoch', -1)
         current_iter = resume_state['iter']

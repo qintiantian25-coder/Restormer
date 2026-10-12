@@ -116,7 +116,7 @@ data_merged/
 
 - 640×512 灰度 PNG（uint8），文件名一一对应，子目录自动递归扫描
 - 当前配置指向 `data_merged/`：train 1090 / val 418 / test 455 对。它等于 `data5/`(2094 张) + `data6/`(1832 张) 的合并副本，`data5/`、`data6/` 是原始来源（保留，不再被配置引用）
-- ⚠️ `val:` 段目前指向 **`data_merged/test_*`**（拿 test 集当验证集），`val_*` 目录存在但没被使用；若要改成 `val_*`，PSNR 与历史记录不可直接对比
+- `val:` 段现指向 **`data_merged/val_*`**（686 对，2026-10-12 从 `test_*` 切换而来）；`test_*`（723 对）留作纯测试集，不再参与 best 门控。⚠️ 切换验证集后 PSNR 与历史记录不可直接对比
 - 训练时网络看到的是 `gt_size`(384×384) 的**随机方形裁剪**，640×512 只是数据切片的尺寸（见 `Dataset_PairedImage_BlindPixel.__getitem__`）
 - 推理分块的边长必须 **≥ 训练 patch**（384）才不出边界痕迹；640×512 分块已实测无拼接痕迹
 - 小于 `gt_size` 的切片会先 reflect padding 再裁剪（`paired_image_dataset.py` 的 padding 分支）。该分支曾因 `cv2.copyMakeBorder` 把单通道 `(H,W,1)` 压成 `(H,W)` 而返回 `(1,gt_size)` 的错误形状，已修复（`img_lq/img_gt` 补回通道维），并有回归测试覆盖
@@ -144,8 +144,8 @@ datasets:
     gt_sizes: [384]
     iters: [180000]                       # ← 总迭代数
   val:
-    dataroot_gt: data_merged/test_sharp   # ← 注意：用的是 test 集
-    dataroot_lq: data_merged/test_blur
+    dataroot_gt: data_merged/val_sharp    # ← 验证集 (2026-10-12 起用 val_*; test_* 留给纯测试)
+    dataroot_lq: data_merged/val_blur
 
 train:
   total_iter: 180000                      # ← 和 iters 一致
@@ -208,7 +208,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 - `best_psnr` 随 `latest.pth` 保存并在续训时恢复 → 续训后不会被更差的验证结果覆盖 `best_model.pth`；warm-start 是全新训练，best 会被第一次验证刷新（**开训前建议先备份旧 `best_model.pth`**）
 - **扩数据**：直接往 `data_merged/train_*` 的对应子目录放图即可（文件名与 sharp 一一对应），启动时自动重扫，无需改配置
 - **加轮数**：把 `datasets.train.iters` 与 `train.total_iter` 一起改大，`periods`/`restart_weights`/`eta_mins` 补上对应段数（`sum(periods) == total_iter`）。真续训时 YAML 里新的 `periods` 会覆盖存档里的旧值并立即生效
-- 若 `val:` 指向的 `test_*` 集也变动了，PSNR 与历史记录不可直接对比
+- 更换验证集（如 `test_*` ↔ `val_*`）后 PSNR 与历史记录不可直接对比；续训时检测到验证集更换会自动重置 best 门槛（`latest.pth` 会记录 `val_gt`）
 
 ### 保存文件
 
