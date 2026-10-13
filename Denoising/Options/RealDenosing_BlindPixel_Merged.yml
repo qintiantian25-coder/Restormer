@@ -19,7 +19,7 @@ datasets:
     dataroot_lq: data_diff/train_blur        # ← 含盲元图像路径
     dataroot_mask: data_diff/train_mask      # ← 盲元 mask (635 张, 已生成)
     in_ch: 1                                 # 1=灰度, 3=RGB
-    blind_weight: 10.0                       # (生效值在 train 段, 此处仅记录)
+    blind_weight: 30.0                       # (生效值在 train 段, 此处仅记录)
     geometric_augs: true
     filename_tmpl: '{}'
     io_backend:
@@ -32,7 +32,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [6000]               # ← data_diff 第三轮: 真实盲元序列加频(009b/011b/013b/014b), 短程 6k
+    iters: [6000]               # ← 第四轮: 真实序列加频 + blind_weight 30, 6k
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -80,7 +80,7 @@ train:
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度
-  blind_weight: 10.0           # 盲元像素损失权重 (需数据集提供 mask; 1=不加权)
+  blind_weight: 30.0           # 盲元像素损失权重 (第四轮: 10->30, 全力压盲元还原; 需 mask)
 
   scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
