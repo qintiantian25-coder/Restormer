@@ -105,3 +105,38 @@ def calculate_blind_count(img1, img2, csv_path, x_col='x', y_col='y'):
     err = _blind_errors(img1, img2, csv_path, x_col=x_col, y_col=y_col)
     return float(err.size)
 
+
+# ============================================================
+#  现场版: 不需要 CSV 坐标表, mask 由 |lq - gt| > thr 直接算出
+#  (训练验证用; 无盲元的图返回 NaN, 由调用方跳过)
+# ============================================================
+
+def _mask_from_lq(gt, lq, thr=30):
+    gt_a = _to_gray_float64(gt)
+    lq_a = _to_gray_float64(lq)
+    if gt_a.shape != lq_a.shape:
+        raise ValueError(f'Image shapes are different: {gt_a.shape}, {lq_a.shape}.')
+    return np.abs(lq_a - gt_a) > thr
+
+
+def calculate_blind_mae_mask(img1, img2, lq, thr=30):
+    """盲元区 MAE (灰度级). mask = |lq - gt| > thr; 无盲元返回 NaN."""
+    mask = _mask_from_lq(img2, lq, thr)
+    if not np.any(mask):
+        return float('nan')
+    pred = _to_gray_float64(img1)
+    gt = _to_gray_float64(img2)
+    return float(np.abs(pred[mask] - gt[mask]).mean())
+
+
+def calculate_blind_psnr_mask(img1, img2, lq, thr=30, peak=255.0):
+    """盲元区 PSNR. mask = |lq - gt| > thr; 无盲元返回 NaN."""
+    mask = _mask_from_lq(img2, lq, thr)
+    if not np.any(mask):
+        return float('nan')
+    pred = _to_gray_float64(img1)
+    gt = _to_gray_float64(img2)
+    err = pred[mask] - gt[mask]
+    mse = float(np.mean(err ** 2))
+    return float(10.0 * np.log10((peak * peak) / max(mse, 1e-12)))
+

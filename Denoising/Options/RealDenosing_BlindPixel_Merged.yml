@@ -122,6 +122,12 @@ val:
       type: calculate_ssim
       crop_border: 0
       test_y_channel: false
+    blind_psnr:                  # 盲元区 PSNR (mask 现场由 |val_blur-val_sharp|>thr 生成)
+      type: calculate_blind_psnr_mask
+      thr: 30
+    blind_mae:                   # 盲元区 MAE (灰度级, 越小越好)
+      type: calculate_blind_mae_mask
+      thr: 30
 
 # ============================================================
 #  日志

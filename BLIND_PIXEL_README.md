@@ -213,6 +213,12 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 - **加轮数**：把 `datasets.train.iters` 与 `train.total_iter` 一起改大，`periods`/`restart_weights`/`eta_mins` 补上对应段数（`sum(periods) == total_iter`）。真续训时 YAML 里新的 `periods` 会覆盖存档里的旧值并立即生效
 - 更换验证集（如 `test_*` ↔ `val_*`）后 PSNR 与历史记录不可直接对比；续训时检测到验证集更换会自动重置 best 门槛（`latest.pth` 会记录 `val_gt`）
 
+### 验证指标与 best 门控
+
+- `val.metrics` 现在包含全图 `psnr`/`ssim` **和盲元区 `blind_psnr`/`blind_mae`**（mask 由 `|val_blur−val_sharp|>30` 现场生成，无盲元的验证图自动跳过；`blind_mae` 单位=灰度级，越小越好）
+- **best 门控优先用 `blind_psnr`**（yml 里存在该项时）——`best_model.pth`/`latest.pth` 按"盲元区 PSNR 最高"保存；`val_log.txt` 每次验证记录全部指标
+- 想回退到全图 `psnr` 门控：删掉 yml 里的 `blind_psnr` 指标项即可
+
 ### 保存文件
 
 训练中不做周期保存（`save_checkpoint_freq: 999999`），仅在验证 PSNR 创新高时**成对更新**：

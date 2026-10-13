@@ -1,7 +1,8 @@
 from .niqe import calculate_niqe
 from .psnr_ssim import calculate_psnr, calculate_ssim
 from .blind_pixel import (calculate_blind_count, calculate_blind_mae,
-						  calculate_blind_psnr, calculate_blind_rmse)
+						  calculate_blind_psnr, calculate_blind_rmse,
+						  calculate_blind_mae_mask, calculate_blind_psnr_mask)
 
 __all__ = [
 	'calculate_psnr',
@@ -10,5 +11,7 @@ __all__ = [
 	'calculate_blind_mae',
 	'calculate_blind_rmse',
 	'calculate_blind_psnr',
-	'calculate_blind_count'
+	'calculate_blind_count',
+	'calculate_blind_mae_mask',
+	'calculate_blind_psnr_mask'
 ]

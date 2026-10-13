@@ -232,6 +232,7 @@ class ImageCleanModel(BaseModel):
             test = self.nonpad_test
 
         cnt = 0
+        blind_cnt = 0   # 含盲元的图计数 (盲元指标只在有盲元的图上平均)
 
         for idx, val_data in enumerate(dataloader):
             lq_path = val_data['lq_path'][0]
@@ -245,6 +246,7 @@ class ImageCleanModel(BaseModel):
             if 'gt' in visuals:
                 gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
                 del self.gt
+            lq_img = tensor2img([self.lq], rgb2bgr=rgb2bgr)   # 盲元 mask 现场计算用
             del self.lq
             del self.output
             torch.cuda.empty_cache()
@@ -271,23 +273,31 @@ class ImageCleanModel(BaseModel):
 
             if with_metrics:
                 opt_metric = deepcopy(self.opt['val']['metrics'])
-                if use_image:
-                    for name, opt_ in opt_metric.items():
-                        metric_type = opt_.pop('type')
+                for name, opt_ in opt_metric.items():
+                    metric_type = opt_.pop('type')
+                    if metric_type in ('calculate_blind_psnr_mask', 'calculate_blind_mae_mask'):
+                        # 盲元指标: mask 由 |lq-gt| 现场生成; 无盲元的图返回 NaN -> 跳过
+                        val = getattr(metric_module, metric_type)(
+                            sr_img, gt_img, lq_img, **opt_)
+                        if not np.isnan(val):
+                            self.metric_results[name] += val
+                            blind_cnt += 1
+                    elif use_image:
                         self.metric_results[name] += getattr(
                             metric_module, metric_type)(sr_img, gt_img, **opt_)
-                else:
-                    for name, opt_ in opt_metric.items():
-                        metric_type = opt_.pop('type')
+                    else:
                         self.metric_results[name] += getattr(
                             metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
             cnt += 1
 
         current_metric = 0.
+        gate_key = 'psnr'   # best 门控指标: 有盲元 PSNR 时优先用它
         if with_metrics:
+            gate_key = 'blind_psnr' if 'blind_psnr' in self.metric_results else 'psnr'
             for metric in self.metric_results.keys():
-                self.metric_results[metric] /= cnt
-                if metric == 'psnr':
+                denom = blind_cnt if metric in ('blind_psnr', 'blind_mae') else cnt
+                self.metric_results[metric] /= max(denom, 1)
+                if metric == gate_key:
                     current_metric = self.metric_results[metric]
             self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
 
@@ -307,8 +317,8 @@ class ImageCleanModel(BaseModel):
                     f.write(f'{current_iter}\t{vals}\n')
 
         # ========== 保存最佳模型 + 训练状态 (仅训练模式) ==========
-        if self.opt['is_train'] and with_metrics and 'psnr' in self.metric_results:
-            current_psnr = self.metric_results['psnr']
+        if self.opt['is_train'] and with_metrics and gate_key in self.metric_results:
+            current_psnr = self.metric_results[gate_key]
             if (not self.opt['dist']) or (self.opt['dist'] and self.opt['rank'] == 0):
                 if current_psnr > self.best_psnr:
                     self.best_psnr = current_psnr
@@ -332,7 +342,7 @@ class ImageCleanModel(BaseModel):
                     torch.save(state, latest_path)
 
                     logger = get_root_logger()
-                    logger.info(f'New best model saved with PSNR: {self.best_psnr:.4f} at iteration {current_iter}')
+                    logger.info(f'New best model saved with {gate_key}: {self.best_psnr:.4f} at iteration {current_iter}')
         # ======================================
 
         return current_metric
