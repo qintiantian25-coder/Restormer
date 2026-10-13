@@ -244,6 +244,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z [--dilate N]`（膨胀 N 像素把盲元边缘过渡带一并加权） |
 | `montage_compare.py` | 并排对比图（原图 \| 各模型修复 \| GT），目视检查用 |
 | `blend_blocks.py` | 盲元块无缝融合后处理（低频色差/接缝校正，保持平滑）：`--blur_dir X --gt_dir Y --pred_dir Z --out_dir W` |
+| `paixv.py` | 删图后序号重排（frame_0001 顺序；多目录联动同名改，`--dry-run` 预览） |
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
