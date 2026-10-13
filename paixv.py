@@ -5,16 +5,20 @@
 支持多目录"同名联动": blur 里 frame_0005 改名 frame_0002 时, sharp (和 mask) 里的同名文件
 一起改 -> 配对关系不断.
 
-用法 (建议先干跑预览):
-  python paixv.py --dry-run --dirs D:\\qtt\\Restormer\\data_diff\\train_blur D:\\qtt\\Restormer\\data_diff\\train_sharp
-  python paixv.py --dirs D:\\qtt\\Restormer\\data_diff\\train_blur D:\\qtt\\Restormer\\data_diff\\train_sharp
+用法 (两种, 任选):
+  # 方式一 (推荐): 直接改下面 CONFIG 区的 DIRS 和 DRY_RUN, 然后运行:
+  python paixv.py
+
+  # 方式二: 命令行传参 (会覆盖 CONFIG 区):
+  python paixv.py --dry-run --dirs D:\\...\\train_blur D:\\...\\train_sharp
+  python paixv.py --dirs D:\\...\\train_blur D:\\...\\train_sharp
 
 选项:
   --dirs     参与联动重命名的目录列表 (第一个目录决定顺序; 各目录内同名文件集合必须一致)
   --prefix   新文件名前缀 (默认 frame_)
   --start    起始编号 (默认 1)
   --ext      处理的扩展名 (默认 .png)
-  --dry-run  只预览, 不改名
+  --dry-run  强制干跑预览 (默认取 CONFIG 区的 DRY_RUN)
 
 说明:
   - 按每个子目录 (递归) 分别重排; 排序依据 = 文件名中最后一段数字 (frame_0007 -> 7)
@@ -26,6 +30,19 @@ import argparse
 import os
 import re
 
+# ======================================================================
+#  ↓↓↓ 直接在这里改路径/开关 ↓↓↓
+DIRS = [
+    r'D:\qtt\Restormer\data_diff\train_blur',
+    r'D:\qtt\Restormer\data_diff\train_sharp',
+]
+PREFIX = 'frame_'
+START = 1
+EXT = '.png'
+DRY_RUN = True     # True = 只预览不改名; 确认无误后改成 False 再运行
+#  ↑↑↑ 直接在这里改路径/开关 ↑↑↑
+# ======================================================================
+
 
 def nat_key(name):
     nums = re.findall(r'\d+', os.path.splitext(name)[0])
@@ -34,16 +51,23 @@ def nat_key(name):
 
 def main():
     ap = argparse.ArgumentParser(description='图片序号重排 (frame_0001 顺序)')
-    ap.add_argument('--dirs', nargs='+', required=True, help='联动重命名的目录 (>=2)')
-    ap.add_argument('--prefix', default='frame_')
-    ap.add_argument('--start', type=int, default=1)
-    ap.add_argument('--ext', default='.png')
-    ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--dirs', nargs='+', default=None,
+                    help='联动重命名的目录 (>=2); 不传则用文件顶部 DIRS')
+    ap.add_argument('--prefix', default=PREFIX)
+    ap.add_argument('--start', type=int, default=START)
+    ap.add_argument('--ext', default=EXT)
+    ap.add_argument('--dry-run', action='store_true',
+                    help='强制干跑预览 (默认取文件顶部 DRY_RUN)')
+    ap.add_argument('--execute', action='store_true',
+                    help='强制正式执行 (即使文件顶部 DRY_RUN=True)')
     args = ap.parse_args()
-    if len(args.dirs) < 2:
+
+    dirs = args.dirs if args.dirs else DIRS
+    dry_run = False if args.execute else (args.dry_run or DRY_RUN)
+    if len(dirs) < 2:
         raise SystemExit('至少给 2 个目录 (如 blur + sharp)')
 
-    roots = [os.path.abspath(d) for d in args.dirs]
+    roots = [os.path.abspath(d) for d in dirs]
     for r in roots:
         if not os.path.isdir(r):
             raise SystemExit(f'目录不存在: {r}')
@@ -90,7 +114,7 @@ def main():
                 for i, old in enumerate(base)]
         changed = sum(1 for a, b in plan if a != b)
         print(f'[{rel}] {len(base)} 个文件, 需改名 {changed} 个')
-        if args.dry_run:
+        if dry_run:
             for a, b in plan[:3]:
                 print(f'    {a} -> {b}')
             if len(plan) > 3:
@@ -108,8 +132,8 @@ def main():
                 os.rename(os.path.join(r, rel, tmp), os.path.join(r, rel, new))
         total += len(base)
 
-    if args.dry_run:
-        print('\n(干跑模式, 未执行任何改名; 去掉 --dry-run 正式执行)')
+    if dry_run:
+        print('\n(干跑模式, 未执行任何改名; 把文件顶部 DRY_RUN 改成 False 再运行)')
     else:
         print(f'\n完成: 共重排 {total} 个文件 x {len(roots)} 个目录')
 
