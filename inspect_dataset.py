@@ -75,6 +75,8 @@ def main():
     # ---------- [2] 配对 ----------
     files = sorted(glob.glob(os.path.join(root, '**', '*.png'), recursive=True))
     rels = [os.path.relpath(f, root) for f in files]
+    # 过滤 mask 目录 (make_masks.py 的产物, 不参与配对统计)
+    rels = [r for r in rels if 'mask' not in os.path.dirname(r).lower()]
     groups = defaultdict(lambda: {'blur': [], 'sharp': []})
     dir_side = defaultdict(lambda: {'blur': 0, 'sharp': 0})   # 归一化目录 -> 两侧文件数
     real_dirs = defaultdict(lambda: {'blur': set(), 'sharp': set()})  # 归一化目录 -> 真实目录名
