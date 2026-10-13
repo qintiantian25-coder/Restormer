@@ -19,7 +19,7 @@ datasets:
     dataroot_lq: data_diff/train_blur        # ← 含盲元图像路径
     dataroot_mask: data_diff/train_mask      # ← 盲元 mask (635 张, 已生成)
     in_ch: 1                                 # 1=灰度, 3=RGB
-    blind_weight: 30.0                       # (生效值在 train 段, 此处仅记录)
+    blind_weight: 50.0                       # (生效值在 train 段, 此处仅记录)
     geometric_augs: true
     filename_tmpl: '{}'
     io_backend:
@@ -32,7 +32,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [12000]              # ← 第四轮续训: 6k -> 12k (终点仍在涨, 低 lr 续跑)
+    iters: [6000]               # ← 第五轮: blind_weight 50, 6k (从 46.80 warm-start)
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -76,15 +76,15 @@ path:
 #  训练参数
 # ============================================================
 train:
-  total_iter: 12000            # ← 和 iters 一致
+  total_iter: 6000             # ← 和 iters 一致
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度
-  blind_weight: 30.0           # 盲元像素损失权重 (第四轮: 10->30, 全力压盲元还原; 需 mask)
+  blind_weight: 50.0           # 盲元像素损失权重 (第五轮: 30->50, 继续压; 需 mask)
 
   scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
-    periods: [12000]                        # ← 单周期余弦 12k (续训时按 YAML 覆盖生效)
+    periods: [6000]                         # ← 单周期余弦 6k
     restart_weights: [1]                    # ← 和 periods 等长
     eta_mins: [0.000001]                    # ← 和 periods 等长
 
