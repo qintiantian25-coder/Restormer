@@ -32,6 +32,8 @@ def main():
     ap.add_argument('--gt_dir', required=True, help='干净图目录 (同结构)')
     ap.add_argument('--out_dir', required=True, help='mask 输出目录')
     ap.add_argument('--thr', type=int, default=30, help='盲元判定阈值 |blur-gt|')
+    ap.add_argument('--dilate', type=int, default=0,
+                    help='mask 膨胀像素数 (把盲元边缘过渡带一并纳入加权, 治"轮廓/残影")')
     args = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(args.blur_dir, '**', '*.png'), recursive=True))
@@ -48,6 +50,9 @@ def main():
             n_skip += 1
             continue
         mask = ((cv2.absdiff(b, g) > args.thr) * 255).astype(np.uint8)
+        if args.dilate > 0:
+            k = 2 * args.dilate + 1
+            mask = cv2.dilate(mask, np.ones((k, k), np.uint8))
         out_path = os.path.join(args.out_dir, rel)
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         cv2.imwrite(out_path, mask)

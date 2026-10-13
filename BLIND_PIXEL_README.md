@@ -239,9 +239,9 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
 | `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路） |
-| `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + 最差样例拼图，不用 GPU） |
+| `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + **过渡带残影统计** + 最差样例拼图，不用 GPU） |
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
-| `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z` |
+| `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z [--dilate N]`（膨胀 N 像素把盲元边缘过渡带一并加权） |
 | `montage_compare.py` | 并排对比图（原图 \| 各模型修复 \| GT），目视检查用 |
 | `blend_blocks.py` | 盲元块无缝融合后处理（低频色差/接缝校正，保持平滑）：`--blur_dir X --gt_dir Y --pred_dir Z --out_dir W` |
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |

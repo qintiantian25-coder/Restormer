@@ -35,6 +35,7 @@ def main():
         files = files[:args.limit]
 
     bucket = {b: {'n': 0, 'area': 0, 'e_in': 0.0, 'e_out': 0.0, 'moved': 0.0} for b in BUCKETS}
+    band = {'px': 0, 'e_in': 0.0, 'e_out': 0.0, 'moved': 0.0}   # 过渡带(块边缘一圈)统计
     img_rows = []      # (rel, 最大块, 图级修复前误差, 图级修复后误差)
     worst = []         # (e_out, rel, (x,y,w,h), area, blur, gt, pred)
     n_img = n_skip = 0
@@ -87,6 +88,15 @@ def main():
         m = mask.astype(bool)
         img_rows.append((rel, img_big, float(eb[m].mean()), float(eo[m].mean())))
 
+        # 过渡带: mask 外扩 3px 减去 mask 本身 (肉眼可见的"轮廓/残影"所在区)
+        md = cv2.dilate(mask, np.ones((7, 7), np.uint8)).astype(bool)
+        band_m = md & ~m
+        if band_m.any():
+            band['px'] += int(band_m.sum())
+            band['e_in'] += float(eb[band_m].sum())
+            band['e_out'] += float(eo[band_m].sum())
+            band['moved'] += float(mv[band_m].sum())
+
     print(f'扫描 {n_img} 张 (跳过 {n_skip}); 盲元判定 |blur-gt| > {args.thr}, 块 >= {args.min_block} px\n')
     print(f'{"块大小(px)":<12}{"块数":>7}{"平均面积":>10}{"修复前误差":>11}{"修复后误差":>11}{"模型改动量":>11}')
     for (lo, hi), b in bucket.items():
@@ -107,6 +117,11 @@ def main():
         all_in = np.mean([r[2] for r in img_rows])
         all_out = np.mean([r[3] for r in img_rows])
         print(f'\n全部 {len(img_rows)} 张的块区平均: 修复前 {all_in:.1f} -> 修复后 {all_out:.1f}')
+
+    if band['px']:
+        px = band['px']
+        print(f'过渡带(块边缘一圈, 外扩3px): 像素 {px} | 修复前 {band["e_in"] / px:.1f} -> '
+              f'修复后 {band["e_out"] / px:.1f} | 改动量 {band["moved"] / px:.1f}')
 
     if args.save_dir and worst:
         os.makedirs(args.save_dir, exist_ok=True)
