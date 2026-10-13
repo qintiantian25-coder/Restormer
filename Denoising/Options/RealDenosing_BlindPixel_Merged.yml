@@ -32,7 +32,7 @@ datasets:
     prefetch_mode: cuda
 
     mini_batch_sizes: [1]       # 实际训练 batch：24G 卡 384 patch 只能 1（实测 13G）；≥64G 卡可设 [4]（实测 51G）
-    iters: [6000]               # ← 第五轮: blind_weight 50, 6k (从 46.80 warm-start)
+    iters: [12000]              # ← 续训: 6k -> 12k (删非块图+膨胀mask轮, 从 iter 6000 续)
     gt_size: 384                # 训练 patch 大小（推理分块必须 ≥ 它；640×512 分块实测无拼接痕迹）
     gt_sizes: [384]
     dataset_enlarge_ratio: 1
@@ -76,7 +76,7 @@ path:
 #  训练参数
 # ============================================================
 train:
-  total_iter: 6000             # ← 和 iters 一致
+  total_iter: 12000            # ← 和 iters 一致
   warmup_iter: -1
   use_grad_clip: true
   use_fp16: true               # 混合精度
@@ -84,7 +84,7 @@ train:
 
   scheduler:                   # 余弦退火重启: 每段长度之和 = total_iter
     type: CosineAnnealingRestartCyclicLR
-    periods: [6000]                         # ← 单周期余弦 6k
+    periods: [12000]                        # ← 单周期余弦 12k (续训时按 YAML 覆盖生效)
     restart_weights: [1]                    # ← 和 periods 等长
     eta_mins: [0.000001]                    # ← 和 periods 等长
 
