@@ -237,6 +237,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
 | `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z` |
 | `montage_compare.py` | 并排对比图（原图 \| 各模型修复 \| GT），目视检查用 |
+| `blend_blocks.py` | 盲元块无缝融合后处理（低频色差/接缝校正，保持平滑）：`--blur_dir X --gt_dir Y --pred_dir Z --out_dir W` |
 | `process_config.yml` | 推理参数（`batch` 按显存选，见「显存与耗时」） |
 | `evaluate_nr.py` | 无参考质量评估 |
 | `train.sh` | 训练启动 |
