@@ -52,6 +52,20 @@ batch: 2                           # 并行 batch，按显存选（见下表）�
 | `nuc` | 有 | NUC → 条纹抑制 → 对比度增强 → Restormer |
 | `nuc` | 无 | 条纹抑制 → 对比度增强 → Restormer |
 
+### 固定测试入口（`test_folder.py`）— 多格式投递箱，一条命令
+
+把要测的图丢进 `test_in\`，运行：
+
+```bash
+python test_folder.py
+```
+
+- **支持格式**：`png / tif / tiff / bmp / jpg / jpeg`（原样读取，16bit 自动转 8bit，彩色转灰度，不做其他预处理——适合已处理好的测试图）+ `raw`（uint16，6000×6000 或方形自动推断边长）
+- raw 的预处理跟随 CONFIG：填了 `RAW_CALIB` 走 NUC→条纹抑制→对比度；不填则条纹抑制→对比度（与 `process_raw.py` 的 `nuc` 模式一致）
+- **输出** `results\<同名>.png`（与输入同名同基名）；重跑覆盖旧结果；同一文件夹里同名不同扩展名（`a.png` + `a.tif`）只测排序靠前的那张，另一张警告跳过
+- 分块参数与 `process_raw.py` 一致（tile 640×512 / overlap 128，小图自动单块）；坏文件打印错误跳过，不中断整批
+- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --batch`
+
 ### PNG 推理（`infer_png.py`）— 单张 / 目录
 
 测试已经预处理好的 PNG，不做 raw/NUC/条纹/对比度，直接 PNG → Restormer → PNG。支持单张和整个目录（递归扫描、保持子目录结构）：
@@ -115,7 +129,7 @@ data_merged/
 ```
 
 - 640×512 灰度 PNG（uint8），文件名一一对应，子目录自动递归扫描
-- 当前配置指向 `data_merged/`：train 1090 / val 418 / test 455 对。它等于 `data5/`(2094 张) + `data6/`(1832 张) 的合并副本，`data5/`、`data6/` 是原始来源（保留，不再被配置引用）
+- `data_merged/` 是基础数据集（train 3326 / val 686 / test 723 对; = `data5/` + `data6/` 的合并副本，`data5/`、`data6/` 是原始来源，保留但不再被配置引用）；**当前 yml 指向 `data_diff/`**（块状盲元实验轮，详见 yml 内注释）
 - `val:` 段现指向 **`data_merged/val_*`**（686 对，2026-10-12 从 `test_*` 切换而来）；`test_*`（723 对）留作纯测试集，不再参与 best 门控。⚠️ 切换验证集后 PSNR 与历史记录不可直接对比
 - 训练时网络看到的是 `gt_size`(384×384) 的**随机方形裁剪**，640×512 只是数据切片的尺寸（见 `Dataset_PairedImage_BlindPixel.__getitem__`）
 - 推理分块的边长必须 **≥ 训练 patch**（384）才不出边界痕迹；640×512 分块已实测无拼接痕迹
@@ -238,6 +252,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `install_deps.sh` | 依赖一键安装脚本（清华镜像源） |
 | `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
+| `test_folder.py` | **固定测试入口**：任意格式（png/tif/tiff/bmp/jpg/raw）丢进 `test_in\` → `python test_folder.py` → 同名 .png 输出到 `results\`（路径在文件顶部 CONFIG） |
 | `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路） |
 | `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + **过渡带残影统计** + 最差样例拼图，不用 GPU） |
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
