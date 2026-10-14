@@ -65,7 +65,7 @@ python test_folder.py
 - **输出** `results\<同名>.png`（与输入同名同基名）；重跑覆盖旧结果；同一文件夹里同名不同扩展名（`a.png` + `a.tif`）只测排序靠前的那张，另一张警告跳过
 - 分块参数与 `process_raw.py` 一致（tile 640×512 / overlap 128，小图自动单块）；坏文件打印错误跳过，不中断整批
 - **只修 mask 区（可选开关）**：CONFIG 里 `USE_MASK = True`，mask 来源二选一（都填时 `MASK_MAT` 优先）：
-  - `MASK_DIR`：mask 目录，与测试图**同名**、尺寸一致（`test_in/a.raw` → `MASK_DIR/a.mat`）——**有 mask 的图只修 mask 区**（其余像素保持原图；模型没有 mask 输入通道，这是输出端合成，见 `mask_blend.py`），**没有 mask 的图照常整图修复**
+  - `MASK_DIR`：mask 目录，与测试图**同名**、尺寸一致（`test_in/a.raw` → `MASK_DIR/a.mat`；填成文件路径时自动按 `MASK_MAT` 处理）——**有 mask 的图只修 mask 区**（其余像素保持原图；模型没有 mask 输入通道，这是输出端合成，见 `mask_blend.py`），**没有 mask 的图照常整图修复**
   - `MASK_MAT`：**直接指定一个 mask 文件**的完整路径（`.mat` 或图片），所有测试图都用它（适合测试帧和 `.mat` 名字对不上、单独指一张的情况）
   输出行会标 `[mask]` / `[无mask, 整图]`，结尾汇总各多少张；`USE_MASK = False`（默认）= 全部整图，与之前完全一样。路径填了但文件/目录不存在 → 打印警告并自动降级（回退另一来源；都不可用则关闭 mask 模式）
 - **mask 文件格式**：图片（png/tif/…，>127 为修复区）**或 `.mat`**——取 MATLAB 变量 `loc`（0/1 盲元判定图，与原始帧同尺寸，如 `YD_SW_A_D_12000_4hz_xs.mat`）；0/1 mask 自动按 >0.5 判定，v7/v7.3(HDF5) 自动识别（h5py 读取自动转置，与 `process_raw.load_calib` 同口径）。`.raw` 测试帧可配同名 `帧名.mat`（`MASK_DIR`），或直接把 `.mat` 路径填到 `MASK_MAT`

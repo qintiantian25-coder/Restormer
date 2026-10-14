@@ -15,6 +15,7 @@
     没有 mask 的图照常整图修复;
     关掉 (USE_MASK=False, 默认) 则全部整图, 与之前完全一样.
     MASK_DIR: 按同名查找 (test_in/a.raw -> MASK_DIR/a.mat 或 a.png), 尺寸须一致;
+    填成文件路径时自动按 MASK_MAT 处理;
     MASK_MAT: 直接指定一个 mask 文件 (.mat 的 loc / 图片) 的路径, 所有测试图都用它 (优先于 MASK_DIR);
     图片 mask >127 为修复区, .mat 取 loc (0/1 判定图)
   - 输出: results/<同名>.png (重名会覆盖旧结果); 同一文件夹里同名不同扩展名 (a.png + a.tif)
@@ -44,7 +45,7 @@ RAW_CALIB = None          # raw 的 NUC 标定 .mat 路径; None = 仅条纹抑�
 STRIPE_DEGREE = 3
 BATCH = 8                 # 24G 卡用 8; 8G 卡用 2
 USE_MASK = False          # ← mask 开关: True = 有 mask 的图只修 mask 区, 没有 mask 的照常整图修复; False = 全部整图
-MASK_DIR = None           # mask 目录 (按同名找 mask: test_in/a.png -> MASK_DIR/a.png / a.mat)
+MASK_DIR = None           # mask 目录 (按同名找 mask: test_in/a.png -> MASK_DIR/a.png / a.mat); 填成文件路径则自动按 MASK_MAT 处理
 MASK_MAT = None           # 或直接指定一个 mask 文件 (.mat 的 loc / 图片) 的完整路径: 所有测试图都用它 (优先于 MASK_DIR)
 MASK_DILATE = 4           # mask 膨胀像素 (4 = 与训练 mask 口径一致, 覆盖盲元边缘过渡带)
 MASK_FEATHER = 3          # 边界羽化 (0 = mask 外严格不动; >0 = 边缘软过渡, 约 2~3 倍宽度内轻微混合)
@@ -115,8 +116,13 @@ def main():
         if mask_mat and not os.path.isfile(mask_mat):
             print(f'!! MASK_MAT 不存在: {mask_mat}')
             mask_mat = None
-        if not mask_mat and mask_dir and not os.path.isdir(mask_dir):
-            print(f'!! MASK_DIR 不存在: {mask_dir}')
+        if mask_dir and not os.path.isdir(mask_dir):
+            if os.path.isfile(mask_dir):
+                # 路径指向文件: 意图就是"用这一个 mask" (常见: 直接填了某个 .mat)
+                print(f'提示: MASK_DIR 填的是文件, 按单一 mask 处理 (等同 MASK_MAT): {mask_dir}')
+                mask_mat = mask_mat or mask_dir
+            else:
+                print(f'!! MASK_DIR 不存在: {mask_dir}')
             mask_dir = None
         if not mask_mat and not mask_dir:
             print('!! mask 源都不可用 (MASK_MAT / MASK_DIR), mask 模式自动关闭, 全部整图输出')
