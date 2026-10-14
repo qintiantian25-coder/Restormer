@@ -112,7 +112,7 @@ python infer_png.py --input data_merged/test_blur/001/frame_0001.png \
 - GT 与输出尺寸不一致时**自动缩放到输出尺寸再比**（如小 GT 放大到 6000×6000），每行会标 `[GT 128x128->512x512 cubic]`；插值用 `--gt_interp nearest|linear|cubic|lanczos` 选（默认 cubic）——和 sim 图生成时的插值口径一致，基线绝对值才严格可比（"输入→修复后"的提升量对插值选择不敏感）
 - `--mask_dilate 4`（默认）：mask 膨胀 4px，与训练 mask 口径一致（覆盖盲元边缘过渡带）
 - `--mask_feather 3`（默认）：边界高斯羽化，软化接缝；**填 0 则膨胀 mask 外逐位不变**
-- 同时给了 `--gt` 时额外打印 **盲元区 PSNR / MAE**（mask 判定区、羽化前，与训练 `blind_psnr`/`blind_mae` 同口径）
+- 同时给了 `--gt` 时额外打印 **盲元区 PSNR / MAE**（mask 判定区、羽化前，与训练 `blind_psnr`/`blind_mae` 同口径）；以及 **非mask区基线 MAE**（mask 外输入 vs GT）——接近 0 说明 GT 放大口径对得上、盲元区指标是真实修复误差；偏大说明指标里混了 GT 口径不匹配的底噪（先统一 `--gt_interp` 再解读）
 
 ```bash
 # 目录 + GT 评估示例: 一张 .mat 管所有图; GT 可给多个目录, 先同名(可换扩展名)再按去后缀主干名找

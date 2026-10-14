@@ -169,8 +169,10 @@ def main():
             if binary is not None:
                 bp_in, bm_in = region_psnr_mae(img, gt, binary)
                 bp_out, bm_out = region_psnr_mae(out_u8, gt, binary)
+                base_mae = float(np.mean(np.abs(img.astype(np.float32) - gt.astype(np.float32))[~binary]))
                 print(f'盲元区 (mask 内 {int(binary.sum())} px): PSNR {bp_in:.2f} -> {bp_out:.2f} dB   '
                       f'MAE {bm_in:.2f} -> {bm_out:.2f} 灰度级')
+                print(f'非mask区基线 MAE: {base_mae:.4f} 灰度级 (输入 vs GT, 反映 GT 口径一致性)')
         return
 
     # ---------- 目录模式 ----------
@@ -198,7 +200,7 @@ def main():
     import basicsr.metrics as metrics
     t_all = time.time()
     psnrs_in, psnrs_out, ssims_out, skipped_gt = [], [], [], 0
-    bp_ins, bp_outs, bm_outs = [], [], []
+    bp_ins, bp_outs, bm_outs, base_maes = [], [], [], []
     for i, f in enumerate(files, 1):
         rel = os.path.relpath(f, args.input)
         out_path = os.path.join(args.output, rel)
@@ -239,7 +241,10 @@ def main():
                     bp_in, bm_in = region_psnr_mae(img, gt, binary)
                     bp_out, bm_out = region_psnr_mae(out_u8, gt, binary)
                     bp_ins.append(bp_in); bp_outs.append(bp_out); bm_outs.append(bm_out)
-                    line += f'  盲元区 {bp_in:.2f}->{bp_out:.2f}dB(MAE {bm_out:.2f})'
+                    base_mae = float(np.mean(np.abs(img.astype(np.float32) - gt.astype(np.float32))[~binary]))
+                    base_maes.append(base_mae)
+                    line += (f'  盲元区 {bp_in:.2f}->{bp_out:.2f}dB(MAE {bm_out:.2f})'
+                             f'  非mask区MAE {base_mae:.2f}')
             else:
                 skipped_gt += 1
                 line += '  [无对应 GT, 跳过指标]'
@@ -262,6 +267,9 @@ def main():
         print(f'===== 盲元区平均 (mask 内, {len(bp_outs)} 张) =====')
         print(f'PSNR: {_mean(bp_ins):.4f} dB -> {_mean(bp_outs):.4f} dB   '
               f'MAE: {_mean(bm_outs):.4f} 灰度级')
+        if base_maes:
+            print(f'非mask区基线 MAE: {_mean(base_maes):.4f} 灰度级 '
+                  f'(输入 vs GT, 越小说明 GT 放大口径越对得上; 偏大则盲元区指标含底噪)')
     if skipped_gt:
         print(f'注意: {skipped_gt} 张因缺 GT 未计入平均指标')
 
