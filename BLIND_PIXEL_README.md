@@ -287,7 +287,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
 | `test_folder.py` | **固定测试入口**：任意格式（png/tif/tiff/bmp/jpg/raw）丢进 `test_in\` → `python test_folder.py` → 同名 .png 输出到 `results\`（路径在文件顶部 CONFIG） |
-| `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路；支持 `--mask`/`--mask_dir` 只修 mask 区 + 盲元区指标） |
+| `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路；支持 `--mask`/`--mask_dir`/`--mask_mat` 只修 mask 区 + 盲元区指标；**`--weights` 必填**） |
 | `mask_blend.py` | mask 合成工具：读 mask（图片 或 `.mat` 的 `loc` 0/1 图，v7/v7.3 自动识别）→ 膨胀/羽化 → `输出×alpha + 原图×(1−alpha)`；被 `test_folder.py` / `infer_png.py` 共用 |
 | `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + **过渡带残影统计** + 最差样例拼图，不用 GPU） |
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |

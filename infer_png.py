@@ -84,8 +84,8 @@ def main():
     parser = argparse.ArgumentParser(description='PNG -> Restormer -> PNG (单张或目录)')
     parser.add_argument('--input', required=True, help='输入 PNG 或 目录')
     parser.add_argument('--output', required=True, help='输出 PNG (单张) 或 目录')
-    parser.add_argument('--weights', default=None,
-                        help='best_model.pth; 省略则随机初始化(仅用于管道自检)')
+    parser.add_argument('--weights', required=True,
+                        help='模型权重 (如 experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth)')
     parser.add_argument('--gt', nargs='+', default=None,
                         help='可选: 干净参考 (文件或目录, 可给多个目录依次查找), 提供后计算 PSNR/SSIM')
     parser.add_argument('--tile_w', type=int, default=640)
@@ -123,12 +123,11 @@ def main():
                       heads=[1, 2, 4, 8], ffn_expansion_factor=2.66,
                       bias=False, LayerNorm_type='BiasFree',
                       dual_pixel_task=False).to(device)
-    if args.weights:
-        ckpt = torch.load(args.weights, map_location='cpu')
-        model.load_state_dict(ckpt['params'])
-        print(f'Weights: {args.weights}')
-    else:
-        print('WARNING: 未提供 --weights, 使用随机初始化 (仅用于管道自检)')
+    if not os.path.isfile(args.weights):
+        raise SystemExit(f'权重不存在: {args.weights}')
+    ckpt = torch.load(args.weights, map_location='cpu', weights_only=True)
+    model.load_state_dict(ckpt['params'])
+    print(f'Weights: {args.weights}')
     model.eval()
 
     is_dir = os.path.isdir(args.input)
