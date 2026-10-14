@@ -64,8 +64,9 @@ python test_folder.py
 - raw 的预处理跟随 CONFIG：填了 `RAW_CALIB` 走 NUC→条纹抑制→对比度；不填则条纹抑制→对比度（与 `process_raw.py` 的 `nuc` 模式一致）
 - **输出** `results\<同名>.png`（与输入同名同基名）；重跑覆盖旧结果；同一文件夹里同名不同扩展名（`a.png` + `a.tif`）只测排序靠前的那张，另一张警告跳过
 - 分块参数与 `process_raw.py` 一致（tile 640×512 / overlap 128，小图自动单块）；坏文件打印错误跳过，不中断整批
-- **只修 mask 区（可选）**：CONFIG 里 `MASK_DIR` 填上 mask 目录（与测试图**同名**、尺寸一致）——只有 mask 区域被修复，其余像素保持原图（模型本身没有 mask 输入通道，这里是输出端合成，见 `mask_blend.py`）。`MASK_DILATE` 默认 4（与训练 mask 口径一致，覆盖盲元边缘过渡带）；`MASK_FEATHER` 默认 3（边界软过渡），填 0 则膨胀 mask 外**逐位不动**。填了 `MASK_DIR` 而某张图没有对应 mask 时该张报失败跳过
-- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `MASK_DIR` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --mask_dilate --mask_feather --batch`
+- **只修 mask 区（可选开关）**：CONFIG 里 `USE_MASK = True` + 填 `MASK_DIR`（mask 与测试图**同名**、尺寸一致）后——**有 mask 的图只修 mask 区**（其余像素保持原图；模型没有 mask 输入通道，这是输出端合成，见 `mask_blend.py`），**没有 mask 的图照常整图修复**；输出行会标 `[mask]` / `[无mask, 整图]`，结尾汇总各多少张。`USE_MASK = False`（默认）= 全部整图，与之前完全一样；`MASK_DIR` 不存在时自动关闭并打印警告
+- `MASK_DILATE` 默认 4（与训练 mask 口径一致，覆盖盲元边缘过渡带）；`MASK_FEATHER` 默认 3（边界软过渡），填 0 则膨胀 mask 外**逐位不动**
+- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `USE_MASK` / `MASK_DIR` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --use_mask --no_mask --mask_dilate --mask_feather --batch`（`--mask_dir` 传了就开启 mask 模式，`--no_mask` 强制关闭）
 
 ### PNG 推理（`infer_png.py`）— 单张 / 目录
 

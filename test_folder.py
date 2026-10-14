@@ -10,8 +10,10 @@
   - raw 若在 CONFIG 里填了 RAW_CALIB (.mat), 走 NUC -> 条纹抑制 -> 对比度;
     不填则仅条纹抑制 -> 对比度 (与 process_raw 的 nuc 模式一致)
   - 其余格式不做预处理 (适合已处理好的测试图, 如 *_sim6000_blind.png)
-  - 若在 CONFIG 里填了 MASK_DIR: 只修 mask 区 (mask 外保持原图; 详见 mask_blend.py),
-    mask 按同名查找 (test_in/a.png -> MASK_DIR/a.<图片扩展名>, 尺寸须一致)
+  - mask 开关 (CONFIG: USE_MASK + MASK_DIR): 开着时 "有 mask 就用 mask" — 有对应 mask 的图
+    只修 mask 区 (mask 外保持原图; 详见 mask_blend.py), 没有 mask 的图照常整图修复;
+    关掉 (USE_MASK=False, 默认) 则全部整图, 与之前完全一样.
+    mask 按同名查找 (test_in/a.png -> MASK_DIR/a.<图片扩展名>), >127 为修复区, 尺寸须一致
   - 输出: results/<同名>.png (重名会覆盖旧结果); 同一文件夹里同名不同扩展名 (a.png + a.tif)
     只处理排序靠前的那个, 另一个打印警告并跳过
   - 分块推理参数与 process_raw 一致 (tile 640x512 / overlap 128), 大图自动滑窗
@@ -38,7 +40,8 @@ WEIGHTS = r'D:\qtt\Restormer\experiments\RealDenosing_BlindPixel_Merged\models\b
 RAW_CALIB = None          # raw 的 NUC 标定 .mat 路径; None = 仅条纹抑制+对比度
 STRIPE_DEGREE = 3
 BATCH = 8                 # 24G 卡用 8; 8G 卡用 2
-MASK_DIR = None           # 填了则只修 mask 区: 按同名找 mask (test_in/a.png -> MASK_DIR/a.png), mask 外保持原图
+USE_MASK = False          # ← mask 开关: True = 有 mask 的图只修 mask 区, 没有 mask 的照常整图修复; False = 全部整图
+MASK_DIR = None           # mask 目录 (USE_MASK=True 时填; 按同名找 mask: test_in/a.png -> MASK_DIR/a.png)
 MASK_DILATE = 4           # mask 膨胀像素 (4 = 与训练 mask 口径一致, 覆盖盲元边缘过渡带)
 MASK_FEATHER = 3          # 边界羽化 (0 = mask 外严格不动; >0 = 边缘软过渡, 约 2~3 倍宽度内轻微混合)
 TILE_W, TILE_H, TILE_OVERLAP = 640, 512, 128
@@ -82,7 +85,9 @@ def main():
     ap.add_argument('--weights', default=None)
     ap.add_argument('--calib', default=None)
     ap.add_argument('--batch', type=int, default=None)
-    ap.add_argument('--mask_dir', default=None, help='只修 mask 区 (覆盖 CONFIG 的 MASK_DIR)')
+    ap.add_argument('--mask_dir', default=None, help='mask 目录 (传了就开启 mask 模式)')
+    ap.add_argument('--use_mask', action='store_true', help='强制开启 mask 模式 (用 CONFIG 的 MASK_DIR)')
+    ap.add_argument('--no_mask', action='store_true', help='强制关闭 mask 模式 (覆盖 CONFIG 的 USE_MASK)')
     ap.add_argument('--mask_dilate', type=int, default=None)
     ap.add_argument('--mask_feather', type=int, default=None)
     args = ap.parse_args()
@@ -94,6 +99,14 @@ def main():
     mask_dir = args.mask_dir if args.mask_dir is not None else MASK_DIR
     mask_dilate = args.mask_dilate if args.mask_dilate is not None else MASK_DILATE
     mask_feather = args.mask_feather if args.mask_feather is not None else MASK_FEATHER
+    use_mask = USE_MASK or args.use_mask or (args.mask_dir is not None)
+    if args.no_mask:
+        use_mask = False
+    if use_mask and not mask_dir:
+        raise SystemExit('mask 开关开着但 MASK_DIR 是空的: 填 mask 目录, 或加 --no_mask 关闭')
+    if use_mask and not os.path.isdir(mask_dir):
+        print(f'!! MASK_DIR 不存在, mask 模式自动关闭, 全部整图输出: {mask_dir}')
+        use_mask = False
 
     os.makedirs(test_dir, exist_ok=True)
     os.makedirs(out_dir, exist_ok=True)
@@ -129,13 +142,15 @@ def main():
             print(f'Calibration: {calib}')
         else:
             print(f'!! 标定文件不存在, raw 将仅做条纹抑制: {calib}')
-    if mask_dir:
-        print(f'Mask: 仅修 mask 区 (膨胀 {mask_dilate}px, 羽化 {mask_feather}px)  <- {mask_dir}')
+    if use_mask:
+        print(f'Mask 模式: 有 mask 的图只修 mask 区 (膨胀 {mask_dilate}px, 羽化 {mask_feather}px), '
+              f'无 mask 的整图修复  <- {mask_dir}')
 
     print(f'\n共 {len(files)} 个待测文件 -> {out_dir}\n')
     used_stems = {}
     done = 0
     failed = 0
+    n_masked = 0
     t_all = time.time()
     for i, name in enumerate(files, 1):
         stem = os.path.splitext(name)[0]
@@ -146,6 +161,7 @@ def main():
         used_stems[stem] = name
         existed = os.path.exists(out_path)
         t0 = time.time()
+        tag = ''
         try:
             img = load_input(os.path.join(test_dir, name), kk, bb)
             h, w = img.shape
@@ -156,22 +172,26 @@ def main():
             out = tiled_forward(model, t, TILE_H, TILE_W, TILE_OVERLAP, device, batch)
             out = out[:, :, :h, :w].squeeze().cpu().numpy()
             out_u8 = (out * 255).round().clip(0, 255).astype(np.uint8)
-            if mask_dir:
+            if use_mask:
                 mp = find_mask(mask_dir, stem)
-                if mp is None:
-                    raise IOError(f'MASK_DIR 里没有 "{stem}" 的 mask (按同名查找, 尺寸须一致)')
-                alpha, _ = load_mask(mp, (h, w), mask_dilate, mask_feather)
-                out_u8 = apply_mask(img, out_u8, alpha)
+                if mp:
+                    alpha, _ = load_mask(mp, (h, w), mask_dilate, mask_feather)
+                    out_u8 = apply_mask(img, out_u8, alpha)
+                    tag = '  [mask]'
+                    n_masked += 1
+                else:
+                    tag = '  [无mask, 整图]'
             imwrite_u(out_path, out_u8)
         except Exception as e:
             print(f'[{i}/{len(files)}] {name}  !! 失败: {e}')
             failed += 1
             continue
         note = '  (覆盖旧结果)' if existed else ''
-        print(f'[{i}/{len(files)}] {name}  ({w}x{h})  {time.time()-t0:.1f}s  -> {stem}.png{note}')
+        print(f'[{i}/{len(files)}] {name}  ({w}x{h})  {time.time()-t0:.1f}s  -> {stem}.png{note}{tag}')
         done += 1
     tail = f', 失败 {failed} 张' if failed else ''
-    print(f'\n完成: {done}/{len(files)} 张{tail}, 总用时 {(time.time()-t_all)/60:.1f} 分钟 -> {out_dir}')
+    tail2 = f' (mask 修复 {n_masked} 张, 整图 {done - n_masked} 张)' if use_mask else ''
+    print(f'\n完成: {done}/{len(files)} 张{tail}{tail2}, 总用时 {(time.time()-t_all)/60:.1f} 分钟 -> {out_dir}')
 
 
 if __name__ == '__main__':
