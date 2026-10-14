@@ -13,7 +13,8 @@
   - mask 开关 (CONFIG: USE_MASK + MASK_DIR): 开着时 "有 mask 就用 mask" — 有对应 mask 的图
     只修 mask 区 (mask 外保持原图; 详见 mask_blend.py), 没有 mask 的图照常整图修复;
     关掉 (USE_MASK=False, 默认) 则全部整图, 与之前完全一样.
-    mask 按同名查找 (test_in/a.png -> MASK_DIR/a.<图片扩展名>), >127 为修复区, 尺寸须一致
+    mask 按同名查找 (test_in/a.raw -> MASK_DIR/a.mat 或 a.png), 尺寸须一致;
+    支持图片 mask (>127 为修复区) 或 .mat 里的 loc (0/1 判定图)
   - 输出: results/<同名>.png (重名会覆盖旧结果); 同一文件夹里同名不同扩展名 (a.png + a.tif)
     只处理排序靠前的那个, 另一个打印警告并跳过
   - 分块推理参数与 process_raw 一致 (tile 640x512 / overlap 128), 大图自动滑窗

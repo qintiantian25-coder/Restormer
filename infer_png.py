@@ -73,7 +73,8 @@ def main():
     parser.add_argument('--overlap', type=int, default=128)
     parser.add_argument('--batch', type=int, default=8)
     parser.add_argument('--limit', type=int, default=0, help='目录模式: 只处理前 N 张 (0=全部)')
-    parser.add_argument('--mask', default=None, help='单张模式: mask 文件, 只修 mask 区 (mask 外保持原图)')
+    parser.add_argument('--mask', default=None,
+                        help='单张模式: mask 文件 (图片 或 .mat 里的 loc), 只修 mask 区 (mask 外保持原图)')
     parser.add_argument('--mask_dir', default=None, help='目录模式: mask 目录 (按相对路径同名查找)')
     parser.add_argument('--mask_dilate', type=int, default=4, help='mask 膨胀像素 (4=与训练 mask 口径一致)')
     parser.add_argument('--mask_feather', type=int, default=3, help='边界羽化像素 (0=mask(膨胀后)外逐位不动)')
