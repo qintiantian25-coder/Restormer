@@ -18,6 +18,10 @@ PNG 修复推理 (测试/验收用): 单张 或 整个目录.
 
   # 只处理前 20 张快速预览:
   ... --limit 20
+
+Mask 模式 (只修 mask 区, mask 外保持原图; 单张用 --mask, 目录用 --mask_dir):
+  python infer_png.py --input xxx_blind.png --output results/xxx_maskfix.png \
+      --mask xxx_mask.png --gt xxx_gt.png --mask_dilate 4 --mask_feather 3
 """
 import argparse
 import glob
@@ -30,6 +34,7 @@ import torch
 import torch.nn.functional as F
 
 from basicsr.models.archs.restormer_arch import Restormer
+from mask_blend import apply_mask, find_mask, load_mask, region_psnr_mae
 from process_raw import tiled_forward
 
 
@@ -68,6 +73,10 @@ def main():
     parser.add_argument('--overlap', type=int, default=128)
     parser.add_argument('--batch', type=int, default=8)
     parser.add_argument('--limit', type=int, default=0, help='目录模式: 只处理前 N 张 (0=全部)')
+    parser.add_argument('--mask', default=None, help='单张模式: mask 文件, 只修 mask 区 (mask 外保持原图)')
+    parser.add_argument('--mask_dir', default=None, help='目录模式: mask 目录 (按相对路径同名查找)')
+    parser.add_argument('--mask_dilate', type=int, default=4, help='mask 膨胀像素 (4=与训练 mask 口径一致)')
+    parser.add_argument('--mask_feather', type=int, default=3, help='边界羽化像素 (0=mask(膨胀后)外逐位不动)')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -97,8 +106,15 @@ def main():
         img = load_gray(args.input)
         hi, wi = img.shape
         print(f'Input: {args.input}  尺寸 {wi}x{hi} (宽x高)')
+        alpha, binary = None, None
+        if args.mask:
+            alpha, binary = load_mask(args.mask, img.shape, args.mask_dilate, args.mask_feather)
+            print(f'Mask: {args.mask}  修复区 {int(binary.sum())} px '
+                  f'(膨胀 {args.mask_dilate}px, 羽化 {args.mask_feather}px)')
         t0 = time.time()
         out_u8 = restore(model, img, device, args.tile_h, args.tile_w, args.overlap, args.batch)
+        if args.mask:
+            out_u8 = apply_mask(img, out_u8, alpha)
         dt = time.time() - t0
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
         cv2.imwrite(args.output, out_u8)
@@ -115,6 +131,11 @@ def main():
             print(f'PSNR: 输入 {psnr_in:.4f} dB -> 修复后 {psnr_out:.4f} dB '
                   f'(提升 {psnr_out - psnr_in:+.4f} dB)')
             print(f'SSIM: 修复后 {ssim_out:.4f}')
+            if binary is not None:
+                bp_in, bm_in = region_psnr_mae(img, gt, binary)
+                bp_out, bm_out = region_psnr_mae(out_u8, gt, binary)
+                print(f'盲元区 (mask 内 {int(binary.sum())} px): PSNR {bp_in:.2f} -> {bp_out:.2f} dB   '
+                      f'MAE {bm_in:.2f} -> {bm_out:.2f} 灰度级')
         return
 
     # ---------- 目录模式 ----------
@@ -129,15 +150,25 @@ def main():
     import basicsr.metrics as metrics
     t_all = time.time()
     psnrs_in, psnrs_out, ssims_out, skipped_gt = [], [], [], 0
+    bp_ins, bp_outs, bm_outs = [], [], []
     for i, f in enumerate(files, 1):
         rel = os.path.relpath(f, args.input)
         out_path = os.path.join(args.output, rel)
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         img = load_gray(f)
         out_u8 = restore(model, img, device, args.tile_h, args.tile_w, args.overlap, args.batch)
+        binary = None
+        line = f'[{i}/{len(files)}] {rel}'
+        if args.mask_dir:
+            mp = find_mask(args.mask_dir, os.path.splitext(rel)[0])
+            if mp:
+                alpha, binary = load_mask(mp, img.shape, args.mask_dilate, args.mask_feather)
+                out_u8 = apply_mask(img, out_u8, alpha)
+                line += '  [mask]'
+            else:
+                line += '  [无对应 mask, 整图输出]'
         cv2.imwrite(out_path, out_u8)
 
-        line = f'[{i}/{len(files)}] {rel}'
         if args.gt:
             gt_path = os.path.join(args.gt, rel)
             if os.path.exists(gt_path):
@@ -148,6 +179,11 @@ def main():
                     s_out = metrics.calculate_ssim(out_u8, gt, crop_border=0, test_y_channel=False)
                     psnrs_in.append(p_in); psnrs_out.append(p_out); ssims_out.append(s_out)
                     line += f'  PSNR {p_in:.2f} -> {p_out:.2f}  SSIM {s_out:.4f}'
+                    if binary is not None:
+                        bp_in, bm_in = region_psnr_mae(img, gt, binary)
+                        bp_out, bm_out = region_psnr_mae(out_u8, gt, binary)
+                        bp_ins.append(bp_in); bp_outs.append(bp_out); bm_outs.append(bm_out)
+                        line += f'  盲元区 {bp_in:.2f}->{bp_out:.2f}dB(MAE {bm_out:.2f})'
                 else:
                     skipped_gt += 1
                     line += '  [GT 尺寸不一致, 跳过]'
@@ -165,6 +201,10 @@ def main():
         print(f'PSNR: 输入 {np.mean(psnrs_in):.4f} dB -> 修复后 {np.mean(psnrs_out):.4f} dB '
               f'(平均提升 {np.mean(psnrs_out) - np.mean(psnrs_in):+.4f} dB)')
         print(f'SSIM: {np.mean(ssims_out):.4f}')
+    if bp_outs:
+        print(f'===== 盲元区平均 (mask 内, {len(bp_outs)} 张) =====')
+        print(f'PSNR: {np.mean(bp_ins):.4f} dB -> {np.mean(bp_outs):.4f} dB   '
+              f'MAE: {np.mean(bm_outs):.4f} 灰度级')
     if skipped_gt:
         print(f'注意: {skipped_gt} 张因缺 GT/尺寸不符未计入平均指标')
 

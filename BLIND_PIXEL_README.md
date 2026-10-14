@@ -64,7 +64,8 @@ python test_folder.py
 - raw 的预处理跟随 CONFIG：填了 `RAW_CALIB` 走 NUC→条纹抑制→对比度；不填则条纹抑制→对比度（与 `process_raw.py` 的 `nuc` 模式一致）
 - **输出** `results\<同名>.png`（与输入同名同基名）；重跑覆盖旧结果；同一文件夹里同名不同扩展名（`a.png` + `a.tif`）只测排序靠前的那张，另一张警告跳过
 - 分块参数与 `process_raw.py` 一致（tile 640×512 / overlap 128，小图自动单块）；坏文件打印错误跳过，不中断整批
-- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --batch`
+- **只修 mask 区（可选）**：CONFIG 里 `MASK_DIR` 填上 mask 目录（与测试图**同名**、尺寸一致）——只有 mask 区域被修复，其余像素保持原图（模型本身没有 mask 输入通道，这里是输出端合成，见 `mask_blend.py`）。`MASK_DILATE` 默认 4（与训练 mask 口径一致，覆盖盲元边缘过渡带）；`MASK_FEATHER` 默认 3（边界软过渡），填 0 则膨胀 mask 外**逐位不动**。填了 `MASK_DIR` 而某张图没有对应 mask 时该张报失败跳过
+- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `MASK_DIR` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --mask_dilate --mask_feather --batch`
 
 ### PNG 推理（`infer_png.py`）— 单张 / 目录
 
@@ -87,6 +88,22 @@ python infer_png.py --input data_merged/test_blur --output results/test_blur_eva
 - 单张模式可选 `--gt <干净参考图>`；目录模式加 `--limit N` 可只跑前 N 张快速预览
 - 分块参数与 `process_raw.py` 一致（640×512 / overlap 128）；`--batch` 按显存调（24G 卡用 8）
 - 640×512 等本身就是 16 倍数的图不会多余 pad，单张 = 一次前向（与训练验证口径一致）
+
+**mask 模式**（只修 mask 区，mask 外保持原图；模型无 mask 输入通道，为输出端合成，实现见 `mask_blend.py`）：
+
+```bash
+# 单张: --mask 传对应 mask (>127 为修复区); 目录: --mask_dir 按相对路径同名查找
+python infer_png.py --input data_merged/test_blur/001/frame_0001.png \
+    --output results/frame_0001_maskfix.png \
+    --mask data_merged/test_mask/001/frame_0001.png \
+    --gt data_merged/test_sharp/001/frame_0001.png \
+    --weights experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth \
+    --batch 8
+```
+
+- `--mask_dilate 4`（默认）：mask 膨胀 4px，与训练 mask 口径一致（覆盖盲元边缘过渡带）
+- `--mask_feather 3`（默认）：边界高斯羽化，软化接缝；**填 0 则膨胀 mask 外逐位不变**
+- 同时给了 `--gt` 时额外打印 **盲元区 PSNR / MAE**（mask 判定区、羽化前，与训练 `blind_psnr`/`blind_mae` 同口径）
 
 ### 块状盲元诊断（`diag_block.py`，不用 GPU）
 
@@ -253,7 +270,8 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `packages/` | 打包的离线依赖 wheel 文件夹（离线安装用，当前不存在） |
 | `process_raw.py` | raw → 修复 PNG |
 | `test_folder.py` | **固定测试入口**：任意格式（png/tif/tiff/bmp/jpg/raw）丢进 `test_in\` → `python test_folder.py` → 同名 .png 输出到 `results\`（路径在文件顶部 CONFIG） |
-| `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路） |
+| `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路；支持 `--mask`/`--mask_dir` 只修 mask 区 + 盲元区指标） |
+| `mask_blend.py` | mask 合成工具：读 mask → 膨胀/羽化 → `输出×alpha + 原图×(1−alpha)`；被 `test_folder.py` / `infer_png.py` 共用 |
 | `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + **过渡带残影统计** + 最差样例拼图，不用 GPU） |
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
 | `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z [--dilate N]`（膨胀 N 像素把盲元边缘过渡带一并加权） |

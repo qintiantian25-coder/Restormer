@@ -10,6 +10,8 @@
   - raw 若在 CONFIG 里填了 RAW_CALIB (.mat), 走 NUC -> 条纹抑制 -> 对比度;
     不填则仅条纹抑制 -> 对比度 (与 process_raw 的 nuc 模式一致)
   - 其余格式不做预处理 (适合已处理好的测试图, 如 *_sim6000_blind.png)
+  - 若在 CONFIG 里填了 MASK_DIR: 只修 mask 区 (mask 外保持原图; 详见 mask_blend.py),
+    mask 按同名查找 (test_in/a.png -> MASK_DIR/a.<图片扩展名>, 尺寸须一致)
   - 输出: results/<同名>.png (重名会覆盖旧结果); 同一文件夹里同名不同扩展名 (a.png + a.tif)
     只处理排序靠前的那个, 另一个打印警告并跳过
   - 分块推理参数与 process_raw 一致 (tile 640x512 / overlap 128), 大图自动滑窗
@@ -24,6 +26,7 @@ import torch
 import torch.nn.functional as F
 
 from basicsr.models.archs.restormer_arch import Restormer
+from mask_blend import apply_mask, find_mask, imread_u, load_mask
 from process_raw import (load_calib, preprocess_nuc, preprocess_nuc_no_calib,
                          read_raw, tiled_forward)
 
@@ -35,17 +38,14 @@ WEIGHTS = r'D:\qtt\Restormer\experiments\RealDenosing_BlindPixel_Merged\models\b
 RAW_CALIB = None          # raw 的 NUC 标定 .mat 路径; None = 仅条纹抑制+对比度
 STRIPE_DEGREE = 3
 BATCH = 8                 # 24G 卡用 8; 8G 卡用 2
+MASK_DIR = None           # 填了则只修 mask 区: 按同名找 mask (test_in/a.png -> MASK_DIR/a.png), mask 外保持原图
+MASK_DILATE = 4           # mask 膨胀像素 (4 = 与训练 mask 口径一致, 覆盖盲元边缘过渡带)
+MASK_FEATHER = 3          # 边界羽化 (0 = mask 外严格不动; >0 = 边缘软过渡, 约 2~3 倍宽度内轻微混合)
 TILE_W, TILE_H, TILE_OVERLAP = 640, 512, 128
 #  ↑↑↑ 直接在这里改路径/参数 ↑↑↑
 # ======================================================================
 
 EXTS = ('.png', '.tif', '.tiff', '.bmp', '.jpg', '.jpeg', '.raw')
-
-
-def imread_u(path, flags=cv2.IMREAD_UNCHANGED):
-    """Unicode 路径安全读图 (Windows 中文路径可用)."""
-    data = np.fromfile(path, dtype=np.uint8)
-    return cv2.imdecode(data, flags)
 
 
 def imwrite_u(path, img):
@@ -82,12 +82,18 @@ def main():
     ap.add_argument('--weights', default=None)
     ap.add_argument('--calib', default=None)
     ap.add_argument('--batch', type=int, default=None)
+    ap.add_argument('--mask_dir', default=None, help='只修 mask 区 (覆盖 CONFIG 的 MASK_DIR)')
+    ap.add_argument('--mask_dilate', type=int, default=None)
+    ap.add_argument('--mask_feather', type=int, default=None)
     args = ap.parse_args()
     test_dir = args.dir or TEST_DIR
     out_dir = args.out or OUT_DIR
     weights = args.weights or WEIGHTS
     calib = args.calib if args.calib is not None else RAW_CALIB
     batch = args.batch or BATCH
+    mask_dir = args.mask_dir if args.mask_dir is not None else MASK_DIR
+    mask_dilate = args.mask_dilate if args.mask_dilate is not None else MASK_DILATE
+    mask_feather = args.mask_feather if args.mask_feather is not None else MASK_FEATHER
 
     os.makedirs(test_dir, exist_ok=True)
     os.makedirs(out_dir, exist_ok=True)
@@ -123,6 +129,8 @@ def main():
             print(f'Calibration: {calib}')
         else:
             print(f'!! 标定文件不存在, raw 将仅做条纹抑制: {calib}')
+    if mask_dir:
+        print(f'Mask: 仅修 mask 区 (膨胀 {mask_dilate}px, 羽化 {mask_feather}px)  <- {mask_dir}')
 
     print(f'\n共 {len(files)} 个待测文件 -> {out_dir}\n')
     used_stems = {}
@@ -147,7 +155,14 @@ def main():
             t = F.pad(t, (0, W - w, 0, H - h), 'reflect')
             out = tiled_forward(model, t, TILE_H, TILE_W, TILE_OVERLAP, device, batch)
             out = out[:, :, :h, :w].squeeze().cpu().numpy()
-            imwrite_u(out_path, (out * 255).round().clip(0, 255).astype(np.uint8))
+            out_u8 = (out * 255).round().clip(0, 255).astype(np.uint8)
+            if mask_dir:
+                mp = find_mask(mask_dir, stem)
+                if mp is None:
+                    raise IOError(f'MASK_DIR 里没有 "{stem}" 的 mask (按同名查找, 尺寸须一致)')
+                alpha, _ = load_mask(mp, (h, w), mask_dilate, mask_feather)
+                out_u8 = apply_mask(img, out_u8, alpha)
+            imwrite_u(out_path, out_u8)
         except Exception as e:
             print(f'[{i}/{len(files)}] {name}  !! 失败: {e}')
             failed += 1
