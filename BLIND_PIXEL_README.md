@@ -109,6 +109,7 @@ python infer_png.py --input data_merged/test_blur/001/frame_0001.png \
 - mask 文件支持图片（>127 为修复区）或 `.mat`（取变量 `loc`，0/1 判定图；0/1 自动按 >0.5）
 - `--mask_mat <文件>`：**一张 mask 对所有图生效**（单张/目录模式通用；测试帧和 `.mat` 名字对不上时直接点一张）
 - GT 查找（评估模式）：先在 `--gt` 给的目录里按同名找（**可给多个目录**依次找；扩展名不同也算，`.tif`/`.tiff` 混用没问题）；还找不到时加 `--gt_suffix <后缀>`，去掉后缀再按主干名找（如 `--gt_suffix _sim6000_blind`：`658_104_sim6000_blind.png` → `GT/658_104.tif`）
+- GT 与输出尺寸不一致时**自动缩放到输出尺寸再比**（如小 GT 放大到 6000×6000），每行会标 `[GT 128x128->512x512 cubic]`；插值用 `--gt_interp nearest|linear|cubic|lanczos` 选（默认 cubic）——和 sim 图生成时的插值口径一致，基线绝对值才严格可比（"输入→修复后"的提升量对插值选择不敏感）
 - `--mask_dilate 4`（默认）：mask 膨胀 4px，与训练 mask 口径一致（覆盖盲元边缘过渡带）
 - `--mask_feather 3`（默认）：边界高斯羽化，软化接缝；**填 0 则膨胀 mask 外逐位不变**
 - 同时给了 `--gt` 时额外打印 **盲元区 PSNR / MAE**（mask 判定区、羽化前，与训练 `blind_psnr`/`blind_mae` 同口径）

@@ -24,7 +24,8 @@ Mask 模式 (只修 mask 区, mask 外保持原图; 单张用 --mask, 目录/批
       --mask xxx_mask.png --gt xxx_gt.png --mask_dilate 4 --mask_feather 3
 
   # 目录 + GT 评估: 一张 .mat mask 对所有图生效; GT 可给多个目录依次找,
-  # 先按同名(可换扩展名)找, 找不到去掉 --gt_suffix 后缀再按主干名找
+  # 先按同名(可换扩展名)找, 找不到去掉 --gt_suffix 后缀再按主干名找;
+  # GT 与输出尺寸不一致会自动缩放到输出尺寸再比 (--gt_interp 选插值, 默认 cubic)
   python infer_png.py --input test_in --output results/_eval \
       --gt D:\\...\\GT E:\\...\\需要仿真的图像 --gt_suffix _sim6000_blind \
       --mask_mat D:\\...\\xxx.mat --batch 8
@@ -53,6 +54,18 @@ def load_gray(path):
     if img.ndim == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return img
+
+
+def load_gt(path, shape, interp):
+    """读 GT; 尺寸与输出不一致时缩放/放大到该尺寸再比 (如小 GT 放大到 6000x6000).
+    返回 (gt, 原尺寸 tuple 或 None=未缩放)."""
+    gt = load_gray(path)
+    if gt.shape != tuple(shape):
+        h0, w0 = gt.shape
+        h, w = shape
+        gt = cv2.resize(gt, (w, h), interpolation=interp)
+        return gt, (h0, w0)
+    return gt, None
 
 
 def restore(model, img, device, tile_h, tile_w, overlap, batch_size):
@@ -89,7 +102,12 @@ def main():
     parser.add_argument('--gt_suffix', default=None,
                         help='目录模式: 找不到同名 GT 时, 去掉输入文件名的该后缀再按主干名找(忽略扩展名) '
                              '(如 _sim6000_blind: 658_4_sim6000_blind.png -> 658_4.tif)')
+    interp_map = {'nearest': cv2.INTER_NEAREST, 'linear': cv2.INTER_LINEAR,
+                  'cubic': cv2.INTER_CUBIC, 'lanczos': cv2.INTER_LANCZOS4}
+    parser.add_argument('--gt_interp', default='cubic', choices=list(interp_map),
+                        help='GT 与输出尺寸不一致时的缩放插值 (默认 cubic; 和 sim 生成口径一致才严格可比)')
     args = parser.parse_args()
+    gt_interp = interp_map[args.gt_interp]
     if args.mask_mat and not os.path.isfile(args.mask_mat):
         raise SystemExit(f'--mask_mat 不存在: {args.mask_mat}')
 
@@ -138,9 +156,10 @@ def main():
         if args.gt:
             if len(args.gt) > 1:
                 print('提示: 单张模式只取第一个 --gt 路径')
-            gt = load_gray(args.gt[0])
-            if gt.shape != out_u8.shape:
-                raise SystemExit(f'GT 尺寸 {gt.shape} 与输出 {out_u8.shape} 不一致')
+            gt, resized = load_gt(args.gt[0], out_u8.shape, gt_interp)
+            if resized:
+                print(f'GT 尺寸 {resized[1]}x{resized[0]} -> {out_u8.shape[1]}x{out_u8.shape[0]} '
+                      f'({args.gt_interp})')
             import basicsr.metrics as metrics
             psnr_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
             psnr_out = metrics.calculate_psnr(out_u8, gt, crop_border=0, test_y_channel=False)
@@ -208,21 +227,20 @@ def main():
                     stem = stem[:-len(args.gt_suffix)]
                 gt_path = gt_index.get(stem)
             if gt_path:
-                gt = load_gray(gt_path)
-                if gt.shape == out_u8.shape:
-                    p_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
-                    p_out = metrics.calculate_psnr(out_u8, gt, crop_border=0, test_y_channel=False)
-                    s_out = metrics.calculate_ssim(out_u8, gt, crop_border=0, test_y_channel=False)
-                    psnrs_in.append(p_in); psnrs_out.append(p_out); ssims_out.append(s_out)
-                    line += f'  PSNR {p_in:.2f} -> {p_out:.2f}  SSIM {s_out:.4f}'
-                    if binary is not None:
-                        bp_in, bm_in = region_psnr_mae(img, gt, binary)
-                        bp_out, bm_out = region_psnr_mae(out_u8, gt, binary)
-                        bp_ins.append(bp_in); bp_outs.append(bp_out); bm_outs.append(bm_out)
-                        line += f'  盲元区 {bp_in:.2f}->{bp_out:.2f}dB(MAE {bm_out:.2f})'
-                else:
-                    skipped_gt += 1
-                    line += '  [GT 尺寸不一致, 跳过]'
+                gt, resized = load_gt(gt_path, out_u8.shape, gt_interp)
+                p_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
+                p_out = metrics.calculate_psnr(out_u8, gt, crop_border=0, test_y_channel=False)
+                s_out = metrics.calculate_ssim(out_u8, gt, crop_border=0, test_y_channel=False)
+                psnrs_in.append(p_in); psnrs_out.append(p_out); ssims_out.append(s_out)
+                line += f'  PSNR {p_in:.2f} -> {p_out:.2f}  SSIM {s_out:.4f}'
+                if resized:
+                    line += (f'  [GT {resized[1]}x{resized[0]}->{out_u8.shape[1]}x{out_u8.shape[0]}'
+                             f' {args.gt_interp}]')
+                if binary is not None:
+                    bp_in, bm_in = region_psnr_mae(img, gt, binary)
+                    bp_out, bm_out = region_psnr_mae(out_u8, gt, binary)
+                    bp_ins.append(bp_in); bp_outs.append(bp_out); bm_outs.append(bm_out)
+                    line += f'  盲元区 {bp_in:.2f}->{bp_out:.2f}dB(MAE {bm_out:.2f})'
             else:
                 skipped_gt += 1
                 line += '  [无对应 GT, 跳过指标]'
@@ -246,7 +264,7 @@ def main():
         print(f'PSNR: {_mean(bp_ins):.4f} dB -> {_mean(bp_outs):.4f} dB   '
               f'MAE: {_mean(bm_outs):.4f} 灰度级')
     if skipped_gt:
-        print(f'注意: {skipped_gt} 张因缺 GT/尺寸不符未计入平均指标')
+        print(f'注意: {skipped_gt} 张因缺 GT 未计入平均指标')
 
 
 if __name__ == '__main__':
