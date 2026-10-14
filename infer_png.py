@@ -23,9 +23,11 @@ Mask 模式 (只修 mask 区, mask 外保持原图; 单张用 --mask, 目录/批
   python infer_png.py --input xxx_blind.png --output results/xxx_maskfix.png \
       --mask xxx_mask.png --gt xxx_gt.png --mask_dilate 4 --mask_feather 3
 
-  # 目录 + GT 评估: 一张 .mat mask 对所有图生效, GT 按"输入名去掉后缀"查找
-  python infer_png.py --input test_in --output results/_eval --gt D:\\...\\GT \
-      --gt_suffix _blind --mask_mat D:\\...\\xxx.mat --batch 8
+  # 目录 + GT 评估: 一张 .mat mask 对所有图生效; GT 可给多个目录依次找,
+  # 先按同名(可换扩展名)找, 找不到去掉 --gt_suffix 后缀再按主干名找
+  python infer_png.py --input test_in --output results/_eval \
+      --gt D:\\...\\GT E:\\...\\需要仿真的图像 --gt_suffix _sim6000_blind \
+      --mask_mat D:\\...\\xxx.mat --batch 8
 """
 import argparse
 import glob
@@ -71,7 +73,8 @@ def main():
     parser.add_argument('--output', required=True, help='输出 PNG (单张) 或 目录')
     parser.add_argument('--weights', default=None,
                         help='best_model.pth; 省略则随机初始化(仅用于管道自检)')
-    parser.add_argument('--gt', default=None, help='可选: 干净参考(文件或目录), 提供后计算 PSNR/SSIM')
+    parser.add_argument('--gt', nargs='+', default=None,
+                        help='可选: 干净参考 (文件或目录, 可给多个目录依次查找), 提供后计算 PSNR/SSIM')
     parser.add_argument('--tile_w', type=int, default=640)
     parser.add_argument('--tile_h', type=int, default=512)
     parser.add_argument('--overlap', type=int, default=128)
@@ -84,7 +87,8 @@ def main():
     parser.add_argument('--mask_dilate', type=int, default=4, help='mask 膨胀像素 (4=与训练 mask 口径一致)')
     parser.add_argument('--mask_feather', type=int, default=3, help='边界羽化像素 (0=mask(膨胀后)外逐位不动)')
     parser.add_argument('--gt_suffix', default=None,
-                        help='目录模式: 找 GT 时先去掉输入文件名的该后缀再查 (如 --gt_suffix _blind)')
+                        help='目录模式: 找不到同名 GT 时, 去掉输入文件名的该后缀再按主干名找(忽略扩展名) '
+                             '(如 _sim6000_blind: 658_4_sim6000_blind.png -> 658_4.tif)')
     args = parser.parse_args()
     if args.mask_mat and not os.path.isfile(args.mask_mat):
         raise SystemExit(f'--mask_mat 不存在: {args.mask_mat}')
@@ -132,7 +136,9 @@ def main():
         mem = torch.cuda.max_memory_allocated(device) / 1024**3 if device.type == 'cuda' else 0
         print(f'Output: {args.output}  用时 {dt:.1f}s  峰值显存 {mem:.1f}G')
         if args.gt:
-            gt = load_gray(args.gt)
+            if len(args.gt) > 1:
+                print('提示: 单张模式只取第一个 --gt 路径')
+            gt = load_gray(args.gt[0])
             if gt.shape != out_u8.shape:
                 raise SystemExit(f'GT 尺寸 {gt.shape} 与输出 {out_u8.shape} 不一致')
             import basicsr.metrics as metrics
@@ -156,7 +162,20 @@ def main():
     if not files:
         raise SystemExit(f'目录里没有 *.png: {args.input}')
     print(f'共 {len(files)} 张 -> {args.output}'
-          + (f'  (GT: {args.gt})' if args.gt else ''))
+          + (f'  (GT: {", ".join(args.gt)})' if args.gt else ''))
+
+    # GT 索引: 主干名(去扩展名, 忽略 tif/tiff 差异) -> 路径; 支持多个 GT 目录
+    IMG_EXTS = ('.png', '.tif', '.tiff', '.bmp', '.jpg', '.jpeg')
+    gt_dirs, gt_index = [], {}
+    if args.gt:
+        for g in args.gt:
+            gt_dirs.append(g)
+            if os.path.isdir(g):
+                for root, _, fnames in os.walk(g):
+                    for fn in fnames:
+                        s, e = os.path.splitext(fn)
+                        if e.lower() in IMG_EXTS:
+                            gt_index.setdefault(s, os.path.join(root, fn))
 
     import basicsr.metrics as metrics
     t_all = time.time()
@@ -181,12 +200,14 @@ def main():
         cv2.imwrite(out_path, out_u8)
 
         if args.gt:
-            gt_path = os.path.join(args.gt, rel)
-            if not os.path.exists(gt_path) and args.gt_suffix:
-                stem, ext = os.path.splitext(rel)
-                if stem.endswith(args.gt_suffix):
-                    gt_path = os.path.join(args.gt, stem[:-len(args.gt_suffix)] + ext)
-            if os.path.exists(gt_path):
+            gt_path = next((p for p in (os.path.join(g, rel) for g in gt_dirs)
+                            if os.path.exists(p)), None)          # 1) 各 GT 目录下同名
+            if gt_path is None:                                    # 2) 去后缀后按主干名找(忽略扩展名)
+                stem = os.path.splitext(rel)[0]
+                if args.gt_suffix and stem.endswith(args.gt_suffix):
+                    stem = stem[:-len(args.gt_suffix)]
+                gt_path = gt_index.get(stem)
+            if gt_path:
                 gt = load_gray(gt_path)
                 if gt.shape == out_u8.shape:
                     p_in = metrics.calculate_psnr(img, gt, crop_border=0, test_y_channel=False)
@@ -211,15 +232,19 @@ def main():
     print(f'\n完成: {len(files)} 张, 总用时 {dt/60:.1f} 分钟'
           + (f', 峰值显存 {torch.cuda.max_memory_allocated(device)/1024**3:.1f}G'
              if device.type == 'cuda' else ''))
+    def _mean(vals):   # 过滤 inf/nan (如 GT 与输入完全一致时 PSNR=inf)
+        vals = [v for v in vals if np.isfinite(v)]
+        return float(np.mean(vals)) if vals else float('nan')
+
     if psnrs_out:
         print(f'===== 平均指标 ({len(psnrs_out)} 张) =====')
-        print(f'PSNR: 输入 {np.mean(psnrs_in):.4f} dB -> 修复后 {np.mean(psnrs_out):.4f} dB '
-              f'(平均提升 {np.mean(psnrs_out) - np.mean(psnrs_in):+.4f} dB)')
-        print(f'SSIM: {np.mean(ssims_out):.4f}')
+        pi, po = _mean(psnrs_in), _mean(psnrs_out)
+        print(f'PSNR: 输入 {pi:.4f} dB -> 修复后 {po:.4f} dB (平均提升 {po - pi:+.4f} dB)')
+        print(f'SSIM: {_mean(ssims_out):.4f}')
     if bp_outs:
         print(f'===== 盲元区平均 (mask 内, {len(bp_outs)} 张) =====')
-        print(f'PSNR: {np.mean(bp_ins):.4f} dB -> {np.mean(bp_outs):.4f} dB   '
-              f'MAE: {np.mean(bm_outs):.4f} 灰度级')
+        print(f'PSNR: {_mean(bp_ins):.4f} dB -> {_mean(bp_outs):.4f} dB   '
+              f'MAE: {_mean(bm_outs):.4f} 灰度级')
     if skipped_gt:
         print(f'注意: {skipped_gt} 张因缺 GT/尺寸不符未计入平均指标')
 
