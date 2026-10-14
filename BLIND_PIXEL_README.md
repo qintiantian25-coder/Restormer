@@ -64,10 +64,13 @@ python test_folder.py
 - raw 的预处理跟随 CONFIG：填了 `RAW_CALIB` 走 NUC→条纹抑制→对比度；不填则条纹抑制→对比度（与 `process_raw.py` 的 `nuc` 模式一致）
 - **输出** `results\<同名>.png`（与输入同名同基名）；重跑覆盖旧结果；同一文件夹里同名不同扩展名（`a.png` + `a.tif`）只测排序靠前的那张，另一张警告跳过
 - 分块参数与 `process_raw.py` 一致（tile 640×512 / overlap 128，小图自动单块）；坏文件打印错误跳过，不中断整批
-- **只修 mask 区（可选开关）**：CONFIG 里 `USE_MASK = True` + 填 `MASK_DIR`（mask 与测试图**同名**、尺寸一致）后——**有 mask 的图只修 mask 区**（其余像素保持原图；模型没有 mask 输入通道，这是输出端合成，见 `mask_blend.py`），**没有 mask 的图照常整图修复**；输出行会标 `[mask]` / `[无mask, 整图]`，结尾汇总各多少张。`USE_MASK = False`（默认）= 全部整图，与之前完全一样；`MASK_DIR` 不存在时自动关闭并打印警告
-- **mask 文件格式**：图片（png/tif/…，>127 为修复区）**或 `.mat`**——取 MATLAB 变量 `loc`（0/1 盲元判定图，与原始帧同尺寸，如 `YD_SW_A_D_12000_4hz_xs.mat`）；0/1 mask 自动按 >0.5 判定，v7/v7.3(HDF5) 自动识别（h5py 读取自动转置，与 `process_raw.load_calib` 同口径）。`.raw` 测试帧可配同名 `帧名.mat`，一张 `.mat` 的 `loc` 即整帧 mask
+- **只修 mask 区（可选开关）**：CONFIG 里 `USE_MASK = True`，mask 来源二选一（都填时 `MASK_MAT` 优先）：
+  - `MASK_DIR`：mask 目录，与测试图**同名**、尺寸一致（`test_in/a.raw` → `MASK_DIR/a.mat`）——**有 mask 的图只修 mask 区**（其余像素保持原图；模型没有 mask 输入通道，这是输出端合成，见 `mask_blend.py`），**没有 mask 的图照常整图修复**
+  - `MASK_MAT`：**直接指定一个 mask 文件**的完整路径（`.mat` 或图片），所有测试图都用它（适合测试帧和 `.mat` 名字对不上、单独指一张的情况）
+  输出行会标 `[mask]` / `[无mask, 整图]`，结尾汇总各多少张；`USE_MASK = False`（默认）= 全部整图，与之前完全一样。路径填了但文件/目录不存在 → 打印警告并自动降级（回退另一来源；都不可用则关闭 mask 模式）
+- **mask 文件格式**：图片（png/tif/…，>127 为修复区）**或 `.mat`**——取 MATLAB 变量 `loc`（0/1 盲元判定图，与原始帧同尺寸，如 `YD_SW_A_D_12000_4hz_xs.mat`）；0/1 mask 自动按 >0.5 判定，v7/v7.3(HDF5) 自动识别（h5py 读取自动转置，与 `process_raw.load_calib` 同口径）。`.raw` 测试帧可配同名 `帧名.mat`（`MASK_DIR`），或直接把 `.mat` 路径填到 `MASK_MAT`
 - `MASK_DILATE` 默认 4（与训练 mask 口径一致，覆盖盲元边缘过渡带）；`MASK_FEATHER` 默认 3（边界软过渡），填 0 则膨胀 mask 外**逐位不动**
-- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `USE_MASK` / `MASK_DIR` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --use_mask --no_mask --mask_dilate --mask_feather --batch`（`--mask_dir` 传了就开启 mask 模式，`--no_mask` 强制关闭）
+- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `USE_MASK` / `MASK_DIR` / `MASK_MAT` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --mask_mat --use_mask --no_mask --mask_dilate --mask_feather --batch`（`--mask_dir` / `--mask_mat` 传了就开启 mask 模式，`--no_mask` 强制关闭）
 
 ### PNG 推理（`infer_png.py`）— 单张 / 目录
 
