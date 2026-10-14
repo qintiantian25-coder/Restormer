@@ -44,9 +44,9 @@ WEIGHTS = r'D:\qtt\Restormer\experiments\RealDenosing_BlindPixel_Merged\models\b
 RAW_CALIB = None          # raw 的 NUC 标定 .mat 路径; None = 仅条纹抑制+对比度
 STRIPE_DEGREE = 3
 BATCH = 8                 # 24G 卡用 8; 8G 卡用 2
-USE_MASK = False          # ← mask 开关: True = 有 mask 的图只修 mask 区, 没有 mask 的照常整图修复; False = 全部整图
+USE_MASK = True          # ← mask 开关: True = 有 mask 的图只修 mask 区, 没有 mask 的照常整图修复; False = 全部整图
 MASK_DIR = None           # mask 目录 (按同名找 mask: test_in/a.png -> MASK_DIR/a.png / a.mat); 填成文件路径则自动按 MASK_MAT 处理
-MASK_MAT = None           # 或直接指定一个 mask 文件 (.mat 的 loc / 图片) 的完整路径: 所有测试图都用它 (优先于 MASK_DIR)
+MASK_MAT = r'D:\qtt\Restormer\test_in_mask\YD_SW_A_D_12000_4hz_xs.mat'           # 或直接指定一个 mask 文件 (.mat 的 loc / 图片) 的完整路径: 所有测试图都用它 (优先于 MASK_DIR)
 MASK_DILATE = 4           # mask 膨胀像素 (4 = 与训练 mask 口径一致, 覆盖盲元边缘过渡带)
 MASK_FEATHER = 3          # 边界羽化 (0 = mask 外严格不动; >0 = 边缘软过渡, 约 2~3 倍宽度内轻微混合)
 TILE_W, TILE_H, TILE_OVERLAP = 640, 512, 128
