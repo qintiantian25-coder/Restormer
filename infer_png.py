@@ -19,9 +19,13 @@ PNG 修复推理 (测试/验收用): 单张 或 整个目录.
   # 只处理前 20 张快速预览:
   ... --limit 20
 
-Mask 模式 (只修 mask 区, mask 外保持原图; 单张用 --mask, 目录用 --mask_dir):
+Mask 模式 (只修 mask 区, mask 外保持原图; 单张用 --mask, 目录/批量用 --mask_dir 或 --mask_mat):
   python infer_png.py --input xxx_blind.png --output results/xxx_maskfix.png \
       --mask xxx_mask.png --gt xxx_gt.png --mask_dilate 4 --mask_feather 3
+
+  # 目录 + GT 评估: 一张 .mat mask 对所有图生效, GT 按"输入名去掉后缀"查找
+  python infer_png.py --input test_in --output results/_eval --gt D:\\...\\GT \
+      --gt_suffix _blind --mask_mat D:\\...\\xxx.mat --batch 8
 """
 import argparse
 import glob
@@ -76,9 +80,14 @@ def main():
     parser.add_argument('--mask', default=None,
                         help='单张模式: mask 文件 (图片 或 .mat 里的 loc), 只修 mask 区 (mask 外保持原图)')
     parser.add_argument('--mask_dir', default=None, help='目录模式: mask 目录 (按相对路径同名查找)')
+    parser.add_argument('--mask_mat', default=None, help='所有图都用这一张 mask (图片 或 .mat; 单张/目录模式都可用)')
     parser.add_argument('--mask_dilate', type=int, default=4, help='mask 膨胀像素 (4=与训练 mask 口径一致)')
     parser.add_argument('--mask_feather', type=int, default=3, help='边界羽化像素 (0=mask(膨胀后)外逐位不动)')
+    parser.add_argument('--gt_suffix', default=None,
+                        help='目录模式: 找 GT 时先去掉输入文件名的该后缀再查 (如 --gt_suffix _blind)')
     args = parser.parse_args()
+    if args.mask_mat and not os.path.isfile(args.mask_mat):
+        raise SystemExit(f'--mask_mat 不存在: {args.mask_mat}')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
@@ -108,13 +117,14 @@ def main():
         hi, wi = img.shape
         print(f'Input: {args.input}  尺寸 {wi}x{hi} (宽x高)')
         alpha, binary = None, None
-        if args.mask:
-            alpha, binary = load_mask(args.mask, img.shape, args.mask_dilate, args.mask_feather)
-            print(f'Mask: {args.mask}  修复区 {int(binary.sum())} px '
+        mask_file = args.mask_mat or args.mask
+        if mask_file:
+            alpha, binary = load_mask(mask_file, img.shape, args.mask_dilate, args.mask_feather)
+            print(f'Mask: {mask_file}  修复区 {int(binary.sum())} px '
                   f'(膨胀 {args.mask_dilate}px, 羽化 {args.mask_feather}px)')
         t0 = time.time()
         out_u8 = restore(model, img, device, args.tile_h, args.tile_w, args.overlap, args.batch)
-        if args.mask:
+        if mask_file:
             out_u8 = apply_mask(img, out_u8, alpha)
         dt = time.time() - t0
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -160,8 +170,8 @@ def main():
         out_u8 = restore(model, img, device, args.tile_h, args.tile_w, args.overlap, args.batch)
         binary = None
         line = f'[{i}/{len(files)}] {rel}'
-        if args.mask_dir:
-            mp = find_mask(args.mask_dir, os.path.splitext(rel)[0])
+        if args.mask_mat or args.mask_dir:
+            mp = args.mask_mat or find_mask(args.mask_dir, os.path.splitext(rel)[0])
             if mp:
                 alpha, binary = load_mask(mp, img.shape, args.mask_dilate, args.mask_feather)
                 out_u8 = apply_mask(img, out_u8, alpha)
@@ -172,6 +182,10 @@ def main():
 
         if args.gt:
             gt_path = os.path.join(args.gt, rel)
+            if not os.path.exists(gt_path) and args.gt_suffix:
+                stem, ext = os.path.splitext(rel)
+                if stem.endswith(args.gt_suffix):
+                    gt_path = os.path.join(args.gt, stem[:-len(args.gt_suffix)] + ext)
             if os.path.exists(gt_path):
                 gt = load_gray(gt_path)
                 if gt.shape == out_u8.shape:
