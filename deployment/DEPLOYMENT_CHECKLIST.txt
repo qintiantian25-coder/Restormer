@@ -14,15 +14,22 @@
 [ ] deployment\ 里 5 个文件已复制到 DEPLOY_ROOT（与 env311、Restormer 同级）:
     check_env.bat / run_test_folder.bat / run_process_raw.bat /
     README_西安离线部署.txt / DEPLOYMENT_CHECKLIST.txt
+[ ] （可选）用 Restormer\deployment\build_deploy_project.ps1 构建精简部署版
+    （产出构建报告: 文件数/总大小/权重/mask/配置/路径残留）
 [ ] 已确认部署链代码不含开发机绝对路径（2026-10-16 审计通过）:
     test_folder.py / process_raw.py / process_config.yml / mask_blend.py / basicsr\
     相对路径一律按"项目根目录=Restormer 文件夹"解析，任意盘符/任意目录可运行
 
 【3. 模型与数据】
 [ ] experiments\RealDenosing_BlindPixel_Merged\models\best_model.pth   (修复权重, 约 100MB)
-[ ] mask 文件: Restormer\test_in_mask\YD_SW_A_D_12000_4hz_xs.mat
-    (mask 模式用; 缺失时程序打印警告并自动关闭 mask 模式, 不中断)
-[ ] NUC 标定 .mat (走 NUC 时携带; 不携带则退化为条纹抑制+对比度)
+[ ] test_folder 所需 mask .mat : Restormer\test_in_mask\YD_SW_A_D_12000_4hz_xs.mat
+    (区域 mask 修复用, 内容是 loc 0/1 盲元判定图; 缺失时程序打印警告并自动关闭 mask 模式)
+[ ] process_raw 所需 NUC calibration .mat : <process_config.yml 里 calib 指向的文件>
+    (NUC 用, 通常包含 kk / bb 两个矩阵)
+    ⚠ 与上面的 mask .mat 不是同一个文件, 不得混用;
+      正式 RAW 流程要求 NUC 时此文件必须存在;
+      构建脚本会校验: 配置了但源文件不存在 -> 默认构建失败
+      (确需无 calib 部署, 须显式加 -AllowMissingCalib, 属人工确认行为)
 [ ] process_config.yml 里 calib / raw_dir 等按现场实际调整（或运行时用 bat 传参覆盖）
 
 【4. 脚本与文档】

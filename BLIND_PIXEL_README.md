@@ -291,7 +291,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `test_folder.py` | **固定测试入口**：任意格式（png/tif/tiff/bmp/jpg/raw）丢进 `test_in\` → `python test_folder.py` → 同名 .png 输出到 `results\`（路径在文件顶部 CONFIG） |
 | `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路；支持 `--mask`/`--mask_dir`/`--mask_mat` 只修 mask 区 + 盲元区指标；**`--weights` 必填**） |
 | `mask_blend.py` | mask 合成工具：读 mask（图片 或 `.mat` 的 `loc` 0/1 图，v7/v7.3 自动识别）→ 膨胀/羽化 → `输出×alpha + 原图×(1−alpha)`；被 `test_folder.py` / `infer_png.py` 共用 |
-| `deployment/` | 离线部署包：`check_env.bat` 环境自检、`run_test_folder.bat` / `run_process_raw.bat` 一键运行（固定 batch 2）、现场说明与清单、冒烟数据生成脚本（复制到 DEPLOY_ROOT 使用） |
+| `deployment/` | 离线部署包：`check_env.bat` 环境自检、`run_test_folder.bat` / `run_process_raw.bat` 一键运行（固定 batch 2）、`build_deploy_project.ps1` 精简部署版构建、现场说明与清单、冒烟数据（复制到 DEPLOY_ROOT 使用） |
 | `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + **过渡带残影统计** + 最差样例拼图，不用 GPU） |
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
 | `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z [--dilate N]`（膨胀 N 像素把盲元边缘过渡带一并加权） |

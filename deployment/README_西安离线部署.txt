@@ -21,6 +21,14 @@ DEPLOY_ROOT\
     不依赖 Conda，整个目录搬到别的盘也能直接用。
   - mask 模式需要 Restormer\test_in_mask\ 下放好 mask 文件（见 §3）；
     没有这个文件时程序会打印警告并自动关闭 mask 模式，仍可正常出图。
+  - 两种 .mat 用途不同，不要混用：
+      mask .mat（放 test_in_mask\ 下）→ 测试/区域 mask 修复用，内容是 loc 0/1 判定图；
+      calibration .mat（process_config.yml 的 calib 指向的文件）→ NUC 用，通常含 kk、bb。
+      正式 RAW 流程要求 NUC 时，calibration 文件必须存在（构建脚本会校验，
+      缺失时默认构建失败；确需无 calib 部署要显式加 -AllowMissingCalib）。
+  - Restormer 目录可用 deployment\build_deploy_project.ps1 一键生成
+    "精简部署版"（只复制两个正式入口所需的文件 + 自动出构建报告），
+    用法见脚本头部注释。
 
 【2. 环境解压】
 
@@ -92,6 +100,7 @@ DEPLOY_ROOT\
        run_process_raw.bat D:\data\raw D:\data\out
        run_process_raw.bat D:\data\raw D:\data\out D:\data\标定.mat
      * 带第 3 个参数 = NUC + 条纹抑制 + 对比度 + 修复
+       （标定文件是含 kk/bb 的 calibration .mat，不是 mask .mat）
      * 不带第 3 个参数 = 按 Restormer\process_config.yml 的配置走
        （其配置里若找不到标定文件，则仅条纹抑制 + 对比度）
 
