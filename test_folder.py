@@ -52,7 +52,7 @@ OUT_DIR = 'results'           # 结果输出这里 (同名 .png)
 WEIGHTS = 'experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth'
 RAW_CALIB = None          # raw 的 NUC 标定 .mat 路径; None = 仅条纹抑制+对比度
 STRIPE_DEGREE = 3
-BATCH = 8                 # 24G 开发机 8; 部署机(≤8G)请用 deployment\run_test_folder.bat (显式 --batch 2)
+BATCH = 2                 # 24G 开发机 8; 部署机(≤8G)请用 deployment\run_test_folder.bat (显式 --batch 2)
 USE_MASK = True          # ← mask 开关: True = 有 mask 的图只修 mask 区, 没有 mask 的照常整图修复; False = 全部整图
 MASK_DIR = None           # mask 目录 (按同名找 mask: test_in/a.png -> MASK_DIR/a.png / a.mat); 填成文件路径则自动按 MASK_MAT 处理
 MASK_MAT = 'test_in_mask/YD_SW_A_D_12000_4hz_xs.mat'   # 单一 mask 文件 (.mat 的 loc / 图片): 所有测试图都用它 (优先于 MASK_DIR); 文件不存在时自动关闭 mask 模式
