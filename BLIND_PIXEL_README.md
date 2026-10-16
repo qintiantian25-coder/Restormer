@@ -1,8 +1,10 @@
 # Restormer 红外盲元修复
 
+> 离线部署（env311 + 西安目标机）：见 `deployment/README_西安离线部署.txt`（自检/一键运行 bat/常见错误/清单）。
+
 ## 推理
 
-1. 修改 `process_config.yml` 中的路径
+1. 修改 `process_config.yml` 中的路径（位于项目根目录；配置与命令行里的相对路径都按项目根目录解析，与 cwd 无关）
 2. 执行:
 
 ```bash
@@ -70,7 +72,7 @@ python test_folder.py
   输出行会标 `[mask]` / `[无mask, 整图]`，结尾汇总各多少张；`USE_MASK = False`（默认）= 全部整图，与之前完全一样。路径填了但文件/目录不存在 → 打印警告并自动降级（回退另一来源；都不可用则关闭 mask 模式）
 - **mask 文件格式**：图片（png/tif/…，>127 为修复区）**或 `.mat`**——取 MATLAB 变量 `loc`（0/1 盲元判定图，与原始帧同尺寸，如 `YD_SW_A_D_12000_4hz_xs.mat`）；0/1 mask 自动按 >0.5 判定，v7/v7.3(HDF5) 自动识别（h5py 读取自动转置，与 `process_raw.load_calib` 同口径）。`.raw` 测试帧可配同名 `帧名.mat`（`MASK_DIR`），或直接把 `.mat` 路径填到 `MASK_MAT`
 - `MASK_DILATE` 默认 4（与训练 mask 口径一致，覆盖盲元边缘过渡带）；`MASK_FEATHER` 默认 3（边界软过渡），填 0 则膨胀 mask 外**逐位不动**
-- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `USE_MASK` / `MASK_DIR` / `MASK_MAT` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --mask_mat --use_mask --no_mask --mask_dilate --mask_feather --batch`（`--mask_dir` / `--mask_mat` 传了就开启 mask 模式，`--no_mask` 强制关闭）
+- 路径/权重/参数都在**文件顶部 CONFIG 区**直接改（`TEST_DIR` / `OUT_DIR` / `WEIGHTS` / `RAW_CALIB` / `USE_MASK` / `MASK_DIR` / `MASK_MAT` / `BATCH`）；也可命令行临时覆盖：`--dir --out --weights --calib --mask_dir --mask_mat --use_mask --no_mask --mask_dilate --mask_feather --batch`（`--mask_dir` / `--mask_mat` 传了就开启 mask 模式，`--no_mask` 强制关闭）。**相对路径一律按项目根目录（Restormer\）解析，与当前工作目录无关**，整个文件夹放到任意盘/任意目录都能运行
 
 ### PNG 推理（`infer_png.py`）— 单张 / 目录
 
@@ -147,7 +149,7 @@ python evaluate_nr.py --output <修复图> --input <原图> --save <结果> --th
 | nu | ↓ | 非均匀性（局部均值变异系数） |
 | estsnr | ↑ | Immerkaer 估计信噪比 |
 
-注意：必须显式传 `--output` / `--input` / `--save`（脚本内置默认路径来自其他项目，直接运行会报错）。
+注意：必须显式传 `--output` / `--input` / `--save`（未传会直接报参数错误）。
 
 ## 训练
 
@@ -289,6 +291,7 @@ rm -rf experiments/RealDenosing_BlindPixel_Merged
 | `test_folder.py` | **固定测试入口**：任意格式（png/tif/tiff/bmp/jpg/raw）丢进 `test_in\` → `python test_folder.py` → 同名 .png 输出到 `results\`（路径在文件顶部 CONFIG） |
 | `infer_png.py` | 单张/目录 PNG 测试推理（已预处理图，免 raw 链路；支持 `--mask`/`--mask_dir`/`--mask_mat` 只修 mask 区 + 盲元区指标；**`--weights` 必填**） |
 | `mask_blend.py` | mask 合成工具：读 mask（图片 或 `.mat` 的 `loc` 0/1 图，v7/v7.3 自动识别）→ 膨胀/羽化 → `输出×alpha + 原图×(1−alpha)`；被 `test_folder.py` / `infer_png.py` 共用 |
+| `deployment/` | 离线部署包：`check_env.bat` 环境自检、`run_test_folder.bat` / `run_process_raw.bat` 一键运行（固定 batch 2）、现场说明与清单、冒烟数据生成脚本（复制到 DEPLOY_ROOT 使用） |
 | `diag_block.py` | 块状盲元诊断（按块大小统计修复前后误差 + **过渡带残影统计** + 最差样例拼图，不用 GPU） |
 | `inspect_dataset.py` | 数据集体检：结构/配对/规格/配对质量/块状盲元统计（`--root <目录>`） |
 | `make_masks.py` | 生成盲元 mask PNG（\|blur−gt\|>阈值 → 255）：`--blur_dir X --gt_dir Y --out_dir Z [--dilate N]`（膨胀 N 像素把盲元边缘过渡带一并加权） |

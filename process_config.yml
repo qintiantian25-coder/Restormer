@@ -1,6 +1,8 @@
 # ============================================================
 #  raw → Restormer 处理管线 配置文件
 #  修改下方路径后执行:  python process_raw.py
+#  路径规则: 下面的相对路径按"项目根目录"(Restormer 文件夹, 即本文件所在目录)
+#            解析, 与当前工作目录无关; 也可填绝对路径。命令行参数优先于本文件。
 # ============================================================
 
 # 输入 raw 文件目录
@@ -15,8 +17,8 @@ weights: "experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth"
 # 处理模式: contrast (仅对比度) 或 nuc (条纹抑制+对比度, 有calib则+NUC)
 mode: "nuc"
 
-# NUC 标定文件 (nuc 模式下可选, 填了做 NUC, 不填仅条纹抑制)
-calib: "/root/Qtt/Restormer/背景数据_灯管/非均匀校正系数/YD_SW_A_D_72000_4hz_xs.mat"
+# NUC 标定文件 (nuc 模式下可选, 填了做 NUC, 不填仅条纹抑制; 相对路径按项目根目录解析)
+calib: "背景数据_灯管/非均匀校正系数/YD_SW_A_D_72000_4hz_xs.mat"
 stripe_degree: 3
 
 # 推理参数

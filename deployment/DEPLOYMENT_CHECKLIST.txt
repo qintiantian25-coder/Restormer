@@ -1,0 +1,51 @@
+﻿============================================================
+ Restormer 红外盲元修复 —— 西安离线部署清单
+（送审/进场前逐项核对打勾）
+============================================================
+
+【1. 环境包】
+[ ] env311_win_x64.tar.gz          conda-pack 打包的 Python 环境
+[ ] env311_win_x64.sha256.txt      SHA256 校验文件
+                                   期望值: 65DFBB80A951BE82EFD503C1D016D315CC6495F0E90712E30915AD86B7FF1FB1
+[ ] 已验证: 解压到全新目录 + conda-unpack 后可直接运行推理（RTX3060 6GB 实测 5/5）
+
+【2. 代码】
+[ ] Restormer 完整代码文件夹
+[ ] deployment\ 里 5 个文件已复制到 DEPLOY_ROOT（与 env311、Restormer 同级）:
+    check_env.bat / run_test_folder.bat / run_process_raw.bat /
+    README_西安离线部署.txt / DEPLOYMENT_CHECKLIST.txt
+[ ] 已确认部署链代码不含开发机绝对路径（2026-10-16 审计通过）:
+    test_folder.py / process_raw.py / process_config.yml / mask_blend.py / basicsr\
+    相对路径一律按"项目根目录=Restormer 文件夹"解析，任意盘符/任意目录可运行
+
+【3. 模型与数据】
+[ ] experiments\RealDenosing_BlindPixel_Merged\models\best_model.pth   (修复权重, 约 100MB)
+[ ] mask 文件: Restormer\test_in_mask\YD_SW_A_D_12000_4hz_xs.mat
+    (mask 模式用; 缺失时程序打印警告并自动关闭 mask 模式, 不中断)
+[ ] NUC 标定 .mat (走 NUC 时携带; 不携带则退化为条纹抑制+对比度)
+[ ] process_config.yml 里 calib / raw_dir 等按现场实际调整（或运行时用 bat 传参覆盖）
+
+【4. 脚本与文档】
+[ ] check_env.bat         环境自检（现场第一步, 必须看到 ALL CHECKS PASSED）
+[ ] run_test_folder.bat   测试图一键修复（tile 640x512 / overlap 128 / batch 2）
+[ ] run_process_raw.bat   真实 RAW 一键修复: RAW_DIR OUTPUT_DIR [CALIB_FILE]
+[ ] README_西安离线部署.txt  操作说明 + 常见错误处理
+
+【5. 测试输入（不涉密）】
+[ ] deployment\test_data\smoke_test.png   640x512 冒烟图
+[ ] deployment\test_data\smoke_test.raw   512x512 冒烟 raw
+[ ] 预期: 把 smoke_test.png 放进 Restormer\test_in\ 跑 run_test_folder.bat,
+         无报错, Restormer\results\ 出现同名 png（内容为平滑/亮点被修复）
+[ ] 注: test_data 两个文件被 .gitignore 的 *.png/*.raw 规则排除, 不在 git 里;
+         打部署包时直接从工作目录取出这两个文件; 或在现场用 env311\python.exe
+         运行 Restormer\deployment\make_smoke_data.py 重新生成（不涉密, 纯合成图）
+
+【6. 现场备忘】
+[ ] 目标机: Windows 10 / RTX 3070 8GB / NVIDIA Driver 531.29
+[ ] 首次上机顺序: nvidia-smi → 解压 env311 → conda-unpack →
+     check_env.bat → 冒烟测试 → 真实 RAW
+[ ] 部署参数基线: tile 640x512 / overlap 128 / batch 2
+     (只允许调小 batch, 不要改分块尺寸)
+[ ] 本清单之外不要在目标机上安装任何软件（包括 Conda / Python）
+
+============================================================

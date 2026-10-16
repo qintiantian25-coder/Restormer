@@ -10,20 +10,14 @@
 
 不依赖 RGB 预训练模型, 纯数学计算, 天然适配灰度红外图像.
 
-用法:
-  python evaluate_nr.py
-  python evaluate_nr.py --output <修复图> --input <原图> --save <结果> --thresholds 5 10 20 30 50
+用法 (三个路径参数必填):
+  python evaluate_nr.py --output <修复图目录> --input <原图目录> --save <结果目录> --thresholds 5 10 20 30 50
 """
 
 import os, re, csv, argparse
 import cv2, numpy as np
 
 
-DEFAULTS = {
-    'output': r"/root/Qtt/FGAF-Net/results/FGAF-Net_BlindPixel_stage2_real/test",
-    'input':  r"/root/Qtt/FGAF-Net/real_image/test_blur",
-    'save':   r"/root/Qtt/FGAF-Net/results/FGAF-Net_BlindPixel_stage2_real/nr_eval",
-}
 DEFAULT_THRESHOLDS = [5, 10, 20, 30, 50]
 
 
@@ -99,9 +93,10 @@ def _resolve_path(base_dir, seq_name, rel_path, img_name):
 # =====================================================================
 
 def main():
-    parser = argparse.ArgumentParser()
-    for k, v in DEFAULTS.items():
-        parser.add_argument(f'--{k}', default=v)
+    parser = argparse.ArgumentParser(description='无参考质量评估 (修复输出 vs 原始输入)')
+    parser.add_argument('--output', required=True, help='修复图目录 (递归扫描 *.png)')
+    parser.add_argument('--input', required=True, help='原始图目录 (与输出按相对路径/同名配对)')
+    parser.add_argument('--save', required=True, help='结果 CSV 输出目录 (自动创建)')
     parser.add_argument('--thresholds', nargs='+', type=int, default=DEFAULT_THRESHOLDS)
     args = parser.parse_args()
 

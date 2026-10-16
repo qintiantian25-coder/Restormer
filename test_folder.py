@@ -4,6 +4,10 @@
 用法 (先改下面 CONFIG 区, 然后一条命令):
   python test_folder.py
 
+路径说明: CONFIG 与命令行的相对路径都按"项目根目录"(本文件所在目录)解析, 与当前
+          工作目录(cwd)无关 —— 整个 Restormer 文件夹放到任意盘/任意目录都能运行;
+          也可以直接填绝对路径。命令行参数优先于 CONFIG。
+
 要点:
   - 支持格式: png / tif / tiff / bmp / jpg / jpeg (原样读取, 16bit 自动转 8bit, 彩色转灰度);
               raw (uint16, 6000x6000 或边长相等方可自动推断)
@@ -25,6 +29,7 @@
 import argparse
 import os
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -36,17 +41,21 @@ from mask_blend import apply_mask, find_mask, imread_u, load_mask
 from process_raw import (load_calib, preprocess_nuc, preprocess_nuc_no_calib,
                          read_raw, tiled_forward)
 
+PROJECT_ROOT = Path(__file__).resolve().parent   # 项目根目录 (本文件所在目录)
+
 # ======================================================================
 #  ↓↓↓ 直接在这里改路径/参数 ↓↓↓
-TEST_DIR = r'D:\qtt\Restormer\test_in'        # 待测文件放这里 (自动创建)
-OUT_DIR = r'D:\qtt\Restormer\results'         # 结果输出这里 (同名 .png)
-WEIGHTS = r'D:\qtt\Restormer\experiments\RealDenosing_BlindPixel_Merged\models\best_model.pth'
+#  路径规则: 相对路径一律按"项目根目录"(本文件所在目录)解析, 与 cwd 无关;
+#            也可填绝对路径 (D:\... 或 /xxx)。命令行参数优先于这里。
+TEST_DIR = 'test_in'          # 待测文件放这里 (自动创建)
+OUT_DIR = 'results'           # 结果输出这里 (同名 .png)
+WEIGHTS = 'experiments/RealDenosing_BlindPixel_Merged/models/best_model.pth'
 RAW_CALIB = None          # raw 的 NUC 标定 .mat 路径; None = 仅条纹抑制+对比度
 STRIPE_DEGREE = 3
-BATCH = 8                 # 24G 卡用 8; 8G 卡用 2
+BATCH = 8                 # 24G 开发机 8; 部署机(≤8G)请用 deployment\run_test_folder.bat (显式 --batch 2)
 USE_MASK = True          # ← mask 开关: True = 有 mask 的图只修 mask 区, 没有 mask 的照常整图修复; False = 全部整图
 MASK_DIR = None           # mask 目录 (按同名找 mask: test_in/a.png -> MASK_DIR/a.png / a.mat); 填成文件路径则自动按 MASK_MAT 处理
-MASK_MAT = r'D:\qtt\Restormer\test_in_mask\YD_SW_A_D_12000_4hz_xs.mat'           # 或直接指定一个 mask 文件 (.mat 的 loc / 图片) 的完整路径: 所有测试图都用它 (优先于 MASK_DIR)
+MASK_MAT = 'test_in_mask/YD_SW_A_D_12000_4hz_xs.mat'   # 单一 mask 文件 (.mat 的 loc / 图片): 所有测试图都用它 (优先于 MASK_DIR); 文件不存在时自动关闭 mask 模式
 MASK_DILATE = 4           # mask 膨胀像素 (4 = 与训练 mask 口径一致, 覆盖盲元边缘过渡带)
 MASK_FEATHER = 3          # 边界羽化 (0 = mask 外严格不动; >0 = 边缘软过渡, 约 2~3 倍宽度内轻微混合)
 TILE_W, TILE_H, TILE_OVERLAP = 640, 512, 128
@@ -54,6 +63,14 @@ TILE_W, TILE_H, TILE_OVERLAP = 640, 512, 128
 # ======================================================================
 
 EXTS = ('.png', '.tif', '.tiff', '.bmp', '.jpg', '.jpeg', '.raw')
+
+
+def _resolve(p):
+    """相对路径按项目根目录解析 (与 cwd 无关); 绝对路径/空值原样返回."""
+    if not p:
+        return p
+    p = str(p)
+    return p if os.path.isabs(p) else os.path.join(str(PROJECT_ROOT), p)
 
 
 def imwrite_u(path, img):
@@ -97,13 +114,13 @@ def main():
     ap.add_argument('--mask_dilate', type=int, default=None)
     ap.add_argument('--mask_feather', type=int, default=None)
     args = ap.parse_args()
-    test_dir = args.dir or TEST_DIR
-    out_dir = args.out or OUT_DIR
-    weights = args.weights or WEIGHTS
-    calib = args.calib if args.calib is not None else RAW_CALIB
+    test_dir = _resolve(args.dir or TEST_DIR)
+    out_dir = _resolve(args.out or OUT_DIR)
+    weights = _resolve(args.weights or WEIGHTS)
+    calib = _resolve(args.calib if args.calib is not None else RAW_CALIB)
     batch = args.batch or BATCH
-    mask_dir = args.mask_dir if args.mask_dir is not None else MASK_DIR
-    mask_mat = args.mask_mat if args.mask_mat is not None else MASK_MAT
+    mask_dir = _resolve(args.mask_dir if args.mask_dir is not None else MASK_DIR)
+    mask_mat = _resolve(args.mask_mat if args.mask_mat is not None else MASK_MAT)
     mask_dilate = args.mask_dilate if args.mask_dilate is not None else MASK_DILATE
     mask_feather = args.mask_feather if args.mask_feather is not None else MASK_FEATHER
     use_mask = (USE_MASK or args.use_mask or (args.mask_dir is not None)

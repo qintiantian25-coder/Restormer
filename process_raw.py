@@ -13,6 +13,10 @@
 
   # NUC 模式
   python process_raw.py --mode nuc --calib <标定.mat> --raw_dir ... --output_dir ... --weights ...
+
+路径说明: 配置文件默认为"项目根目录"下的 process_config.yml (本文件所在目录);
+          配置里与命令行的相对路径都按项目根目录解析, 与当前工作目录(cwd)无关,
+          绝对路径原样使用 —— 整个 Restormer 文件夹放到任意盘/任意目录都能运行。
 """
 
 import argparse, os, sys, time
@@ -21,6 +25,8 @@ from glob import glob
 import cv2, numpy as np, torch, torch.nn.functional as F
 
 from basicsr.models.archs.restormer_arch import Restormer
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))   # 项目根目录 (本文件所在目录)
 
 
 # =====================================================================
@@ -142,7 +148,8 @@ def tiled_forward(model, x, th, tw, overlap, device, batch_size):
 
 def main():
     parser = argparse.ArgumentParser(description='Raw → Restormer pipeline')
-    parser.add_argument('--config', default='process_config.yml', help='YAML config file')
+    parser.add_argument('--config', default=os.path.join(PROJECT_ROOT, 'process_config.yml'),
+                        help='YAML config file (默认: 项目根目录下的 process_config.yml)')
     parser.add_argument('--raw_dir', default=None)
     parser.add_argument('--output_dir', default=None)
     parser.add_argument('--weights', default=None)
@@ -164,14 +171,21 @@ def main():
     class Args:
         pass
     args = Args()
+    PATH_KEYS = ('raw_dir', 'output_dir', 'weights', 'calib')
     for key in ['raw_dir', 'output_dir', 'weights', 'mode', 'calib',
                 'stripe_degree', 'tile_w', 'tile_h', 'tile_overlap', 'batch']:
         cli_val = getattr(cli, key, None)
         cfg_val = cfg.get(key)
-        setattr(args, key, cli_val if cli_val is not None else cfg_val)
+        val = cli_val if cli_val is not None else cfg_val
+        if key in PATH_KEYS and val and not os.path.isabs(str(val)):
+            # 相对路径按项目根目录解析 (与 cwd 无关); 绝对路径原样使用
+            val = os.path.join(PROJECT_ROOT, str(val))
+        setattr(args, key, val)
 
     if not args.raw_dir or not args.output_dir or not args.weights:
         sys.exit('Missing raw_dir/output_dir/weights (set in config or CLI)')
+    if not os.path.isfile(args.weights):
+        sys.exit(f'Weights not found: {args.weights}')
 
     os.makedirs(args.output_dir, exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -199,7 +213,8 @@ def main():
             K, B = load_calib(args.calib)
             use_nuc = True
         else:
-            print('No calibration file, NUC skipped (stripe suppression only)')
+            print('No calibration file, NUC skipped (stripe suppression only)'
+                  + (f': {args.calib}' if args.calib else ''))
     print(f'Pipe: {"NUC→stripe→contrast" if use_nuc else ("stripe→contrast" if args.mode=="nuc" else "contrast only")}')
 
     # --- 处理 ---
